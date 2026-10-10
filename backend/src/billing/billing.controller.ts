@@ -117,7 +117,6 @@ export class BillingController {
       'refundPaymentId' in result &&
       result.refundPaymentId &&
       (result.refundState === 'refunded' ||
-        result.refundState === 'pending' ||
         result.refundState === 'failed')
     ) {
       this.kingService.updateRefundStatusByPayment(
