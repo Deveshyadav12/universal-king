@@ -1,0 +1,10 @@
+{
+  "id": "4612e9e1-cf73-4e37-941a-ecd37016278a",
+  "status": "failed",
+  "files": [],
+  "process": null,
+  "name": "RESTAURENT",
+  "type": "Web App",
+  "stack": "Next.js + TypeScript",
+  "description": "Create a polished, responsive business website with a strong hero, services, testimonials, pricing, and contact sections. Use accessible semantic HTML and a cohesive design system."
+}

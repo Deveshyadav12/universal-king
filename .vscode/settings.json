@@ -1,0 +1,5 @@
+{
+    "python-envs.defaultEnvManager": "ms-python.python:system",
+    "cloude-code-toolbox.intelligence.autoScanMcpSkillsOnWorkspaceOpen": true,
+    "cloude-code-toolbox.tokenOptimization.enabled": true
+}

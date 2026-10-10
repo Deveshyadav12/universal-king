@@ -1,0 +1,15 @@
+{
+  "id": "963b1576-6d44-4ce2-a1a5-0948e4cd6481",
+  "status": "failed",
+  "files": [
+    "app/page.tsx",
+    "package-lock.json",
+    "package.json",
+    "README.md"
+  ],
+  "process": null,
+  "name": "HexaWave API Smoke Test",
+  "type": "Web App",
+  "stack": "Next.js + TypeScript",
+  "description": "Create one simple page with a heading and a button."
+}

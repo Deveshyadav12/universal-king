@@ -1,0 +1,7 @@
+name = "hexawave-inbound-email"
+main = "email-worker.js"
+compatibility_date = "2026-10-09"
+workers_dev = true
+
+[vars]
+HEXAWAVE_API_URL = "https://replace-with-your-public-backend-host"
