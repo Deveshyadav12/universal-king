@@ -14,7 +14,7 @@ async function bootstrap() {
   app.use(urlencoded({ extended: true, limit: "8mb" }));
 
   app.enableCors({
-    origin: "*",
+    origin: "https://www.jaipurstore.tech",
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
   });
