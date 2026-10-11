@@ -14,13 +14,14 @@ async function bootstrap() {
   app.use(urlencoded({ extended: true, limit: "8mb" }));
 
   app.enableCors({
-    origin: "http://localhost:3000",
+    origin: "*",
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
   });
 
   app.setGlobalPrefix("api");
 
-  await app.listen(4000);
+  await app.listen(process.env.PORT || 4000);
 
   console.log("");
   console.log("======================================");
