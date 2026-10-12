@@ -111,13 +111,13 @@ export class AuthController {
     };
   }
 
-  private setSessionCookie(response: Response, token: string): void {
-    response.cookie(COOKIE_NAME, token, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      maxAge: this.authService.getSessionLifetimeSeconds() * 1000,
-      path: '/',
-    });
-  }
+ private setSessionCookie(response: Response, token: string): void {
+  response.cookie(COOKIE_NAME, token, {
+    httpOnly: true,
+    sameSite: 'none',
+    secure: true,
+    maxAge: this.authService.getSessionLifetimeSeconds() * 1000,
+    path: '/',
+  });
+}
 }
