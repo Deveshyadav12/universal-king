@@ -984,6 +984,14 @@ function AIDeveloperWorkspace() {
           >
             New project
           </Link>
+          {projectId && (
+            <Link
+              href={`/projects/${encodeURIComponent(projectId)}/deployment`}
+              className="rounded-md border border-cyan-300/20 px-2.5 py-1.5 text-[10px] text-cyan-200 transition hover:bg-cyan-300/10"
+            >
+              Client deployment
+            </Link>
+          )}
         </div>
 
         <div className="flex flex-1 items-center justify-center gap-2">

@@ -2,6 +2,9 @@
 
 **What works**
 
+- Per-project FTP/FTPS/SFTP settings now use AES-GCM encrypted credentials and authenticated project-owner APIs. The Next.js project workspace links to a deployment settings page with write-only credential inputs, connection testing, file preview, explicit first-deployment authorization, and activity/status history.
+- Deployment preview excludes known secret/development files and checks shared-host compatibility. Live file upload intentionally fails closed until secure sandboxing and verified artifact generation are available; no remote writes are performed. Deployment key/store requirements are documented in `.env.example` and the backend README.
+- Focused verification passed: NestJS backend build, 8 deployment/controller tests, frontend TypeScript check, targeted ESLint, and Next.js production build.
 - Admin-only, manual Brevo SMTP sending from the CRM to one eligible lead at a time; suppressed leads are excluded, and successful sends update lead contact status and audit history. Email and SMTP settings stay backend-only.
 - Brevo email service and lead service tests passed (10 tests); NestJS backend and Next.js frontend production builds passed.
 - `evaluateBaselineRule`: price > 200 BUY, price < 200 SELL, exactly 200 HOLD
@@ -44,6 +47,8 @@
 - Broker adapter for live execution
 - Real equities quote venue (NSE/NYSE)
 - Isolated build/run sandbox and a separate deployment-approval workflow
+- Secure expiring client-invitation access, sandboxed deployable artifact generation, remote backups/rollback, hash verification, and enabling live FTP/FTPS/SFTP deployment
+- CRM-led project intake/build-vs-maintain automation, client progress portal updates, and completion email
 - Complete security audit, including auth abuse/rate limiting and deployment network policy review
 
 **Known issues**

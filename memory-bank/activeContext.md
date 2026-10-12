@@ -1,11 +1,19 @@
 # Active context
 
-**Current focus**: Complete manual, admin-only Brevo SMTP sending from the CRM with server-side credentials and lead suppression/status checks.
+**Current focus**: Deliver per-project FTP/FTPS/SFTP configuration and safe deployment preview, while keeping live uploads disabled until sandboxed artifact validation exists.
 
 **Live run status**: Frontend is available at `http://localhost:3000`, backend at `http://localhost:4000`, Ollama at `http://127.0.0.1:11434`, and the restarted AI service at `http://localhost:8000`. Local Qwen generation and AI health checks passed. Admin credentials remain local in `backend/.env`; never print or commit them.
 
 **In progress**:
 
+- [x] Add encrypted per-project FTP/FTPS/SFTP credentials and owner-scoped deployment endpoints
+- [x] Add authenticated project deployment settings UI, connection test, preview, first-deployment authorization, status, and activity log
+- [x] Fail closed for live uploads until sandbox and verified artifact pipeline exist
+- [x] Document deployment encryption key and persistent-store configuration; never read `backend/.env`
+- [x] Verify backend build, 8 focused deployment/controller tests, frontend type-check, targeted lint, and frontend production build
+- [ ] Integrate secure expiring CRM invitation flow into client portal access
+- [ ] Build sandboxed artifact validation, backups/rollback, remote hash verification, and live upload
+- [ ] Automate client intake, project creation/maintenance, live progress portal updates, and completion email
 - [x] Require the configured service token on AI-service routes and fail closed in production when missing
 - [x] Send the service token from NestJS and refuse production AI calls when it is not configured
 - [x] Disable generated project install/build/run in production until execution is isolated
@@ -48,6 +56,8 @@
 
 **Decisions (recent)**:
 
+- Each project has its own encrypted hosting connection; SFTP requires a pinned SHA-256 server fingerprint.
+- First live deployment requires explicit authorization. Live upload stays disabled until isolated validation and a verified artifact pipeline are implemented.
 - Keep the editor lightweight for now; defer Monaco while building IDE workflow/UI.
 - Fast mode combines planning and architecture into one model pass but does not promise a one-minute end-to-end completion.
 - Communicate current execution support accurately: generated Node/npm and Python projects can build/run; additional runtimes need dedicated runner support.

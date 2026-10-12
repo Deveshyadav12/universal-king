@@ -1,4 +1,5 @@
-﻿import type { Metadata } from "next";
+import { Suspense } from "react";
+import type { Metadata } from "next";
 import "./globals.css";
 import { AuthGate } from "@/components/auth-gate";
 
@@ -15,7 +16,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body><AuthGate>{children}</AuthGate></body>
+      <body>
+        <Suspense fallback={<div className="min-h-screen bg-[#070a10]" />}>
+          <AuthGate>{children}</AuthGate>
+        </Suspense>
+      </body>
     </html>
   );
 }

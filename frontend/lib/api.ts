@@ -82,6 +82,52 @@ export interface ProjectActionResponse {
   };
 }
 
+export type ProjectDeploymentStatus =
+  | "Pending"
+  | "Validating"
+  | "Connection Tested"
+  | "Awaiting Authorization"
+  | "Uploading"
+  | "Verifying"
+  | "Deployed"
+  | "Failed";
+
+export interface ProjectDeploymentPreview {
+  compatible: boolean;
+  files: string[];
+  excludedFiles: string[];
+  blockers: string[];
+  warnings: string[];
+  createdAt: string;
+}
+
+export interface ProjectDeploymentConnection {
+  configured: boolean;
+  protocol?: "ftp" | "ftps" | "sftp";
+  host?: string;
+  port?: number;
+  remoteDirectory?: string;
+  hasCredentials: boolean;
+  hostKeyFingerprint?: string;
+  updatedAt?: string;
+}
+
+export interface ProjectDeploymentInfo {
+  connection: ProjectDeploymentConnection;
+  deployment: {
+    status: ProjectDeploymentStatus;
+    firstDeploymentAuthorized: boolean;
+    lastConnectionTestAt: string | null;
+    preview: ProjectDeploymentPreview | null;
+    logs: Array<{
+      id: string;
+      status: ProjectDeploymentStatus;
+      message: string;
+      timestamp: string;
+    }>;
+  };
+}
+
 export interface AiHealthResponse {
   success: boolean;
   service: string;
@@ -583,6 +629,64 @@ export async function runProject(projectId: string): Promise<ProjectActionRespon
 
 export async function stopProject(projectId: string): Promise<ProjectActionResponse> {
   return apiRequest(`/projects/${encodeURIComponent(projectId)}/stop`, {
+    method: "POST",
+  });
+}
+
+export async function getProjectDeployment(
+  projectId: string,
+): Promise<ProjectDeploymentInfo> {
+  return apiRequest(`/projects/${encodeURIComponent(projectId)}/deployment`);
+}
+
+export async function saveProjectDeploymentConnection(
+  projectId: string,
+  settings: {
+    protocol: "ftp" | "ftps" | "sftp";
+    host: string;
+    port: number;
+    username: string;
+    remoteDirectory: string;
+    password?: string;
+    privateKey?: string;
+    hostKeyFingerprint?: string;
+  },
+): Promise<{ connection: ProjectDeploymentConnection }> {
+  return apiRequest(`/projects/${encodeURIComponent(projectId)}/deployment/connection`, {
+    method: "PUT",
+    body: JSON.stringify(settings),
+  });
+}
+
+export async function testProjectDeploymentConnection(
+  projectId: string,
+): Promise<{ connected: true; checkedAt: string; protocol: "ftp" | "ftps" | "sftp" }> {
+  return apiRequest(`/projects/${encodeURIComponent(projectId)}/deployment/test-connection`, {
+    method: "POST",
+  });
+}
+
+export async function previewProjectDeployment(
+  projectId: string,
+): Promise<{ preview: ProjectDeploymentPreview }> {
+  return apiRequest(`/projects/${encodeURIComponent(projectId)}/deployment/preview`, {
+    method: "POST",
+  });
+}
+
+export async function authorizeFirstProjectDeployment(
+  projectId: string,
+): Promise<{ authorized: true; authorizedAt: string }> {
+  return apiRequest(
+    `/projects/${encodeURIComponent(projectId)}/deployment/authorize-first-deployment`,
+    { method: "POST" },
+  );
+}
+
+export async function deployProject(
+  projectId: string,
+): Promise<{ success: boolean }> {
+  return apiRequest(`/projects/${encodeURIComponent(projectId)}/deployment/deploy`, {
     method: "POST",
   });
 }

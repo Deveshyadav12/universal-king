@@ -75,6 +75,25 @@ reports whether the SMTP settings are complete, and `POST /api/email/send`
 performs an authenticated send. Keep SMTP credentials server-side and never add
 them to frontend environment variables.
 
+## Client hosting connection settings
+
+Project owners can save a per-project FTP, FTPS, or SFTP connection. Before
+enabling this feature, configure `HEXAWAVE_DEPLOYMENT_ENCRYPTION_KEY` as a
+unique 32-byte key encoded as 64 hexadecimal characters and
+`HEXAWAVE_DEPLOYMENT_STORE` as a private persistent data path. For example,
+generate a key with `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`
+in a trusted local terminal and put the result directly into the backend's
+secret settings; do not commit it. Rotate it only with a planned migration of
+the encrypted deployment store.
+
+FTP/FTPS/SFTP test-connection checks credentials and the selected remote
+directory, resolves the host to public IP addresses, and never uploads files.
+SFTP requires a verified SHA-256 server host-key fingerprint. Deployment
+previews exclude secrets and build/development files, but live uploads remain
+disabled until an isolated build sandbox and verified artifact pipeline exist.
+The deployment API deliberately fails closed and reports that no files were
+uploaded while those gates are unavailable.
+
 ## Compile and run the project
 
 ```bash

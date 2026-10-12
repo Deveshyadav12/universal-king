@@ -11,6 +11,7 @@ import { BillingService } from "../billing/billing.service";
 import { ProjectsController } from "./projects.controller";
 import type { Project } from "./projects.service";
 import { ProjectsService } from "./projects.service";
+import { DeploymentService } from "./deployment.service";
 
 function createFreeBillingService(): BillingService {
   const directory = mkdtempSync(join(tmpdir(), "hexawave-project-billing-"));
@@ -60,6 +61,7 @@ describe("ProjectsController maintenance import", () => {
       projectsService,
       aiService,
       createFreeBillingService(),
+      new DeploymentService(),
     );
 
     const result = await controller.runAutonomousProjectTask(
@@ -113,6 +115,7 @@ describe("ProjectsController maintenance import", () => {
       projectsService,
       aiService,
       createFreeBillingService(),
+      new DeploymentService(),
     );
 
     const result = await controller.maintainProjectWithAi(
@@ -165,6 +168,7 @@ describe("ProjectsController maintenance import", () => {
           { provide: ProjectsService, useValue: projectsService },
           { provide: AiService, useValue: aiService },
           { provide: BillingService, useValue: createFreeBillingService() },
+          { provide: DeploymentService, useValue: new DeploymentService() },
         ],
       }).compile();
       app = module.createNestApplication();

@@ -13,6 +13,7 @@ import { Project, ProjectsService } from "./projects.service";
 import { AuthenticatedUser } from "../users/users.service";
 import { CurrentUser } from "../auth/auth.decorators";
 import { BillingService } from "../billing/billing.service";
+import { DeploymentService } from "./deployment.service";
 
 interface ProjectInput {
   name: string;
@@ -44,6 +45,7 @@ export class ProjectsController {
     private readonly projectsService: ProjectsService,
     private readonly aiService: AiService,
     private readonly billingService: BillingService,
+    private readonly deploymentService: DeploymentService,
   ) {}
 
   @Get()
@@ -287,6 +289,81 @@ export class ProjectsController {
     const metadata = await this.aiService.getProject(id);
     this.projectsService.syncProject(metadata.project);
     return result;
+  }
+
+  @Get(":id/deployment")
+  async getDeployment(
+    @Param("id") id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const project = await this.authorizeProject(id, user);
+    return {
+      connection: this.deploymentService.getConnection(id, project.ownerId),
+      deployment: this.deploymentService.getStatus(id, project.ownerId),
+    };
+  }
+
+  @Put(":id/deployment/connection")
+  async saveDeploymentConnection(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const project = await this.authorizeProject(id, user);
+    return {
+      connection: this.deploymentService.saveConnection(
+        id,
+        project.ownerId,
+        body,
+      ),
+    };
+  }
+
+  @Post(":id/deployment/test-connection")
+  async testDeploymentConnection(
+    @Param("id") id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const project = await this.authorizeProject(id, user);
+    return this.deploymentService.testConnection(id, project.ownerId);
+  }
+
+  @Post(":id/deployment/preview")
+  async previewDeployment(
+    @Param("id") id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const project = await this.authorizeProject(id, user);
+    const fileListing = await this.aiService.getProjectFiles(id);
+    return {
+      preview: this.deploymentService.createPreview(
+        id,
+        project.ownerId,
+        { stack: project.stack, status: project.status },
+        fileListing.files,
+      ),
+    };
+  }
+
+  @Post(":id/deployment/authorize-first-deployment")
+  async authorizeFirstDeployment(
+    @Param("id") id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const project = await this.authorizeProject(id, user);
+    return this.deploymentService.authorizeFirstDeployment(
+      id,
+      project.ownerId,
+    );
+  }
+
+  @Post(":id/deployment/deploy")
+  async deploy(
+    @Param("id") id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<never> {
+    const project = await this.authorizeProject(id, user);
+    return this.deploymentService.requestDeployment(id, project.ownerId);
   }
 
   private async authorizeProject(
