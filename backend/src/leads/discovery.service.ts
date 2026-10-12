@@ -19,13 +19,12 @@ const DEFAULT_INDUSTRIES = ["software", "technology", "healthcare", "manufacturi
 
 interface SearchResult {
   title?: unknown;
-  link?: unknown;
-  snippet?: unknown;
+  url?: unknown;
+  content?: unknown;
 }
 
 interface SearchResponse {
-  error?: unknown;
-  organic_results?: unknown;
+  results?: unknown;
 }
 
 export interface DiscoveryTargets {
@@ -46,7 +45,7 @@ export interface DiscoveryRun {
 export class DiscoveryService implements OnModuleDestroy {
   private scheduleEnabled =
     process.env.HEXAWAVE_DISCOVERY_DAILY_ENABLED === "true" &&
-    Boolean(process.env.SERPAPI_API_KEY);
+    Boolean(process.env.TAVILY_API_KEY);
   private targets: DiscoveryTargets = {
     industries: DEFAULT_INDUSTRIES,
     sizeSegments: [...LEAD_SIZE_SEGMENTS],
@@ -78,8 +77,8 @@ export class DiscoveryService implements OnModuleDestroy {
   status() {
     this.resetDailyCountersIfNeeded();
     return {
-      provider: "SerpApi Google Search",
-      providerConfigured: Boolean(process.env.SERPAPI_API_KEY),
+      provider: "Tavily Search API",
+      providerConfigured: Boolean(process.env.TAVILY_API_KEY),
       scheduleEnabled: this.scheduleEnabled,
       schedulePersistence: "in-memory; resets on backend restart",
       dailyLeadLimit: DAILY_LEAD_LIMIT,
@@ -96,9 +95,9 @@ export class DiscoveryService implements OnModuleDestroy {
     if (typeof enabled !== "boolean") {
       throw new BadRequestException("enabled must be a boolean.");
     }
-    if (enabled && !process.env.SERPAPI_API_KEY) {
+    if (enabled && !process.env.TAVILY_API_KEY) {
       throw new ServiceUnavailableException(
-        "Set SERPAPI_API_KEY in the backend environment before enabling daily discovery.",
+        "Set TAVILY_API_KEY in the backend environment before enabling daily discovery.",
       );
     }
     if (targets) this.targets = this.validateTargets(targets);
@@ -128,9 +127,9 @@ export class DiscoveryService implements OnModuleDestroy {
       throw new ConflictException("A lead discovery run is already in progress.");
     }
     this.resetDailyCountersIfNeeded();
-    if (!process.env.SERPAPI_API_KEY) {
+    if (!process.env.TAVILY_API_KEY) {
       throw new ServiceUnavailableException(
-        "Google Search discovery is not configured. Set SERPAPI_API_KEY in the backend environment.",
+        "Tavily lead discovery is not configured. Set TAVILY_API_KEY in the backend environment.",
       );
     }
     if (this.dailyQueriesUsed >= DAILY_QUERY_LIMIT) {
@@ -245,34 +244,48 @@ export class DiscoveryService implements OnModuleDestroy {
   }
 
   private async search(query: string, market: "India" | "International", signal: AbortSignal) {
-    const params = new URLSearchParams({
-      engine: "google",
-      api_key: process.env.SERPAPI_API_KEY!,
-      q: query,
-      num: "10",
-      ...(market === "India" ? { gl: "in", hl: "en" } : { hl: "en" }),
-    });
-    const response = await fetch(`https://serpapi.com/search.json?${params}`, {
+    const apiKey = process.env.TAVILY_API_KEY?.trim();
+    if (!apiKey) {
+      throw new ServiceUnavailableException(
+        "Tavily lead discovery is not configured. Set TAVILY_API_KEY in the backend environment.",
+      );
+    }
+    const response = await fetch("https://api.tavily.com/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        api_key: apiKey,
+        query,
+        search_depth: "basic",
+        topic: "general",
+        max_results: 10,
+        ...(market === "India" ? { country: "india" } : {}),
+      }),
       signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
     });
     if (!response.ok) {
       throw new ServiceUnavailableException(
-        `Google Search provider returned HTTP ${response.status}. Check the SerpApi account and quota.`,
+        `Tavily Search API returned HTTP ${response.status}. Check the Tavily API key and usage quota.`,
       );
     }
-    const payload: unknown = await response.json();
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new ServiceUnavailableException(
+        "Tavily Search API returned an invalid response.",
+      );
+    }
     if (!payload || typeof payload !== "object") {
-      throw new ServiceUnavailableException("Google Search provider returned an invalid response.");
+      throw new ServiceUnavailableException("Tavily Search API returned an invalid response.");
     }
     const data = payload as SearchResponse;
-    if (typeof data.error === "string" && data.error) {
-      throw new ServiceUnavailableException(`Google Search provider error: ${data.error.slice(0, 300)}`);
+    if (!Array.isArray(data.results)) {
+      throw new ServiceUnavailableException(
+        "Tavily Search API returned invalid search results.",
+      );
     }
-    if (data.organic_results === undefined) return [];
-    if (!Array.isArray(data.organic_results)) {
-      throw new ServiceUnavailableException("Google Search provider returned invalid search results.");
-    }
-    return data.organic_results as SearchResult[];
+    return data.results as SearchResult[];
   }
 
   private toLeadInput(
@@ -283,14 +296,14 @@ export class DiscoveryService implements OnModuleDestroy {
   ): CreateLeadInput | undefined {
     if (
       typeof result.title !== "string" ||
-      typeof result.link !== "string" ||
-      typeof result.snippet !== "string"
+      typeof result.url !== "string" ||
+      typeof result.content !== "string"
     ) {
       return undefined;
     }
     let url: URL;
     try {
-      url = new URL(result.link);
+      url = new URL(result.url);
     } catch {
       return undefined;
     }
@@ -302,9 +315,9 @@ export class DiscoveryService implements OnModuleDestroy {
     return {
       companyName: title,
       website: url.origin,
-      source: "SerpApi Google Search",
+      source: "Tavily Search API",
       sourceUrl: url.toString().slice(0, 2048),
-      description: result.snippet.trim().slice(0, 1000),
+      description: result.content.trim().slice(0, 1000),
       industry,
       location: market === "India"
         ? "India search target (verify)"

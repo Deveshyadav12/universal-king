@@ -1,11 +1,15 @@
 # Active context
 
-**Current focus**: Deliver per-project FTP/FTPS/SFTP configuration and safe deployment preview, while keeping live uploads disabled until sandboxed artifact validation exists.
+**Current focus**: Use Tavily Search API (not SerpApi) for CRM lead discovery; server reads the API key only from `TAVILY_API_KEY`.
 
 **Live run status**: Frontend is available at `http://localhost:3000`, backend at `http://localhost:4000`, Ollama at `http://127.0.0.1:11434`, and the restarted AI service at `http://localhost:8000`. Local Qwen generation and AI health checks passed. Admin credentials remain local in `backend/.env`; never print or commit them.
 
 **In progress**:
 
+- [x] Replace SerpApi lead discovery with server-side Tavily Search API requests
+- [x] Preserve India/international targeting and daily query/lead caps; 7 focused tests pass and setup documentation is updated
+- [x] Confirm a missing Tavily API key fails closed; do not inspect the tagged `backend/.env`
+- [ ] Configure `TAVILY_API_KEY` in the local backend environment and Render backend service before live CRM discovery
 - [x] Add encrypted per-project FTP/FTPS/SFTP credentials and owner-scoped deployment endpoints
 - [x] Add authenticated project deployment settings UI, connection test, preview, first-deployment authorization, status, and activity log
 - [x] Fail closed for live uploads until sandbox and verified artifact pipeline exist

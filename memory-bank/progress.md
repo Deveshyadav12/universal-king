@@ -2,6 +2,7 @@
 
 **What works**
 
+- CRM lead discovery now calls the Tavily Search API instead of SerpApi; server-side `TAVILY_API_KEY` configuration, India targeting, international searches, result normalization, and non-leaking provider errors are covered. All 7 focused discovery tests and the NestJS build passed. A Tavily API key is not available in the current runtime, so a live CRM discovery request cannot yet be smoke-tested.
 - Per-project FTP/FTPS/SFTP settings now use AES-GCM encrypted credentials and authenticated project-owner APIs. The Next.js project workspace links to a deployment settings page with write-only credential inputs, connection testing, file preview, explicit first-deployment authorization, and activity/status history.
 - Deployment preview excludes known secret/development files and checks shared-host compatibility. Live file upload intentionally fails closed until secure sandboxing and verified artifact generation are available; no remote writes are performed. Deployment key/store requirements are documented in `.env.example` and the backend README.
 - Focused verification passed: NestJS backend build, 8 deployment/controller tests, frontend TypeScript check, targeted ESLint, and Next.js production build.

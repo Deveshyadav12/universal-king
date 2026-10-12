@@ -48,14 +48,17 @@ single local backend process only, not multi-instance production deployments.
 Move these records to PostgreSQL and use shared durable session/key management
 before deploying a multi-instance service.
 
-## Google lead discovery setup
+## Tavily lead discovery setup
 
-The CRM's Google lead discovery uses SerpApi. Create a key with SerpApi, set
-`SERPAPI_API_KEY` in the private `backend/.env` file, and restart the backend.
-Then refresh the CRM page; discovery and its optional daily schedule become
-available when the backend reports the key is configured. Never add the key to
-frontend environment variables or paste it into the browser. Provider usage may
-be subject to SerpApi account limits and charges.
+The CRM's lead discovery uses the Tavily Search API. Create a Tavily API key and
+set `TAVILY_API_KEY` in the private `backend/.env` file or the backend service's
+secret environment (Render: add it to the backend web service), then restart the
+backend. Refresh the CRM page; discovery and its optional daily schedule become
+available when the backend reports Tavily as configured. Never add this key to
+frontend environment variables or expose it in the browser. Requests are sent
+server-to-server to `https://api.tavily.com/search`; India-targeted searches set
+Tavily's country to `india`, while international searches use the query's
+international targeting without a country restriction.
 
 ## Brevo CRM email sending
 

@@ -28,6 +28,7 @@
 - Trading availability is persisted in `data/trading-feature.json` (override with `HEXAWAVE_TRADING_FEATURE_STORE`), defaults disabled, and is controlled only by King through `/api/trading/availability`.
 - AI service routes require a shared `HEXAWAVE_AI_SERVICE_TOKEN` when configured and fail closed without it in production; `/health` remains public.
 - Project-wide maintenance is available at `POST /projects/:id/ai-maintain` through the tenant-authorized NestJS API. AI context is capped at 40 files, 12,000 characters per file, and 60,000 characters total; generated replacements are validated before writing.
+- CRM lead discovery calls Tavily Search API server-to-server using backend-only `TAVILY_API_KEY`; India queries pass country `india`, while international queries are not country-restricted. Discovery stays disabled unless the key exists and retains its daily query and lead caps.
 - `POST /projects/:id/ai-autonomous` runs a bounded maintain → static checks → supported tests → build → up-to-three-repairs workflow. Node tests run only when `package.json` defines a test script; Python unittest discovery runs only when matching test files exist. Reports skipped tests explicitly.
 - Project build, dependency installation, and run are disabled when `HEXAWAVE_ENV`, `NODE_ENV`, or `APP_ENV` is `production`, pending OS-level sandboxing.
 - Billing checkout, plans, credit packs, payment verification, and paid software-request submission use `/api/billing/*`. Prices and recurring plan IDs are King-managed; billing defaults disabled.
