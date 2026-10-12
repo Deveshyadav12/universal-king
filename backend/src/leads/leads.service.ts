@@ -299,6 +299,21 @@ export class LeadsService {
     return lead;
   }
 
+  recordOutboundEmailSent(id: string): Lead {
+    const lead = this.get(id);
+    const timestamp = new Date().toISOString();
+    if (lead.status === "READY_TO_CONTACT") {
+      lead.status = "CONTACTED";
+    }
+    lead.lastContactedAt = timestamp;
+    lead.updatedAt = timestamp;
+    this.leads.set(lead.id, lead);
+    this.record(lead, "OUTBOUND_EMAIL_SENT", "SUCCESS", {
+      status: lead.status,
+    });
+    return structuredClone(lead);
+  }
+
   applyInboundEvent(
     email: string,
     eventType: "reply" | "unsubscribe" | "bounce",

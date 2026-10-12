@@ -1,23 +1,108 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   ServiceUnavailableException,
   UnauthorizedException,
 } from "@nestjs/common";
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { createTransport } from "nodemailer";
 import { LeadsService } from "../leads/leads.service";
 
 const MAX_TIMESTAMP_SKEW_SECONDS = 300;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+interface SmtpConfiguration {
+  host: string;
+  port: number;
+  user: string;
+  password: string;
+  fromEmail: string;
+  fromName: string;
+}
 
 @Injectable()
 export class EmailService {
+  private readonly logger = new Logger(EmailService.name);
+
   constructor(private readonly leadsService: LeadsService) {}
 
   getStatus() {
     return {
       inboundConfigured: Boolean(process.env.CLOUDFLARE_EMAIL_WEBHOOK_SECRET),
-      outboundConfigured: false,
+      outboundConfigured: this.getSmtpConfiguration() !== null,
     };
+  }
+
+  async sendLeadEmail(payload: unknown) {
+    if (
+      typeof payload !== "object" ||
+      payload === null ||
+      Array.isArray(payload) ||
+      !("leadId" in payload) ||
+      !("subject" in payload) ||
+      !("text" in payload)
+    ) {
+      throw new BadRequestException("Email payload must include leadId, subject, and text.");
+    }
+
+    const { leadId, subject, text } = payload;
+    if (typeof leadId !== "string" || !leadId.trim() || leadId.length > 100) {
+      throw new BadRequestException("A valid leadId is required.");
+    }
+    if (
+      typeof subject !== "string" ||
+      !subject.trim() ||
+      subject.trim().length > 200 ||
+      /[\r\n]/.test(subject)
+    ) {
+      throw new BadRequestException("Subject must be 1-200 characters without line breaks.");
+    }
+    if (typeof text !== "string" || !text.trim() || text.length > 10_000) {
+      throw new BadRequestException("Email text must be 1-10000 characters.");
+    }
+
+    const config = this.getSmtpConfiguration();
+    if (!config) {
+      throw new ServiceUnavailableException(
+        "Outbound email is not configured. Set the BREVO_SMTP_USER, BREVO_SMTP_KEY, and BREVO_FROM_EMAIL backend variables.",
+      );
+    }
+
+    const lead = this.leadsService.get(leadId.trim());
+    if (!lead.email || !EMAIL_PATTERN.test(lead.email)) {
+      throw new BadRequestException("This lead does not have a valid email address.");
+    }
+    if (lead.status !== "READY_TO_CONTACT" && lead.status !== "FOLLOW_UP") {
+      throw new BadRequestException(
+        "Email can only be sent to leads with READY_TO_CONTACT or FOLLOW_UP status.",
+      );
+    }
+
+    const transporter = createTransport({
+      host: config.host,
+      port: config.port,
+      secure: config.port === 465,
+      auth: { user: config.user, pass: config.password },
+    });
+    let messageId: string;
+    try {
+      const result = await transporter.sendMail({
+        from: { name: config.fromName, address: config.fromEmail },
+        to: lead.email,
+        subject: subject.trim(),
+        text: text.trim(),
+      });
+      messageId = result.messageId;
+    } catch (error: unknown) {
+      this.logger.error(
+        "Brevo SMTP could not send the CRM email.",
+        error instanceof Error ? error.name : "Unknown SMTP error",
+      );
+      throw new ServiceUnavailableException("Brevo SMTP could not send the email.");
+    }
+    const updatedLead = this.leadsService.recordOutboundEmailSent(lead.id);
+    return { success: true, messageId, lead: updatedLead };
   }
 
   receiveCloudflareEvent(
@@ -76,5 +161,29 @@ export class EmailService {
       email,
       eventType as "reply" | "unsubscribe" | "bounce",
     );
+  }
+
+  private getSmtpConfiguration(): SmtpConfiguration | null {
+    const host = process.env.BREVO_SMTP_HOST?.trim() || "smtp-relay.brevo.com";
+    const portValue = process.env.BREVO_SMTP_PORT?.trim() || "587";
+    const port = Number(portValue);
+    const user = process.env.BREVO_SMTP_USER?.trim();
+    const password = process.env.BREVO_SMTP_KEY?.trim();
+    const fromEmail = process.env.BREVO_FROM_EMAIL?.trim();
+    const fromName = process.env.BREVO_FROM_NAME?.trim() || "HexaWave";
+
+    if (
+      !user ||
+      !password ||
+      !fromEmail ||
+      !EMAIL_PATTERN.test(fromEmail) ||
+      !Number.isInteger(port) ||
+      port < 1 ||
+      port > 65_535
+    ) {
+      return null;
+    }
+
+    return { host, port, user, password, fromEmail, fromName };
   }
 }

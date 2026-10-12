@@ -1,6 +1,6 @@
 # Active context
 
-**Current focus**: Wire Razorpay checkout for recurring subscriptions, paid company software requests, and AI credit packs, with server-verified fulfillment and production fail-closed behavior.
+**Current focus**: Complete manual, admin-only Brevo SMTP sending from the CRM with server-side credentials and lead suppression/status checks.
 
 **Live run status**: Frontend is available at `http://localhost:3000`, backend at `http://localhost:4000`, Ollama at `http://127.0.0.1:11434`, and the restarted AI service at `http://localhost:8000`. Local Qwen generation and AI health checks passed. Admin credentials remain local in `backend/.env`; never print or commit them.
 
@@ -19,6 +19,7 @@
 - [ ] Implement an OS/container sandbox before enabling generated code execution in production
 - [x] Gate trading API and automation; default feature to disabled and expose a King-only switch
 - [x] Hide the trading link/screen until the King enables the feature
+- [x] Add Brevo SMTP sending for one manually composed CRM email at a time; exclude suppressed and non-contactable leads
 - [x] Add independent frontend/backend hosting, language, and hosting-compatible framework choices to the AI build studio
 - [x] Verify trading feature guard tests and frontend/backend builds after final edits
 - [x] Add prompt-first AI build studio and quick starts to the empty IDE workspace

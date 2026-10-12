@@ -24,6 +24,7 @@ import {
   getLeads,
   runLeadDiscovery,
   scoreLead,
+  sendLeadEmail,
   setLeadDiscoverySchedule,
   stopLeadDiscovery,
   suppressLead,
@@ -92,9 +93,15 @@ export default function CrmPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
+  const [actionNotice, setActionNotice] = useState("");
   const [saving, setSaving] = useState(false);
   const [scoringId, setScoringId] = useState("");
   const [suppressingId, setSuppressingId] = useState("");
+  const [emailComposerLead, setEmailComposerLead] = useState<Lead | null>(null);
+  const [emailSubject, setEmailSubject] = useState("");
+  const [emailText, setEmailText] = useState("");
+  const [emailSendError, setEmailSendError] = useState("");
+  const [sendingEmail, setSendingEmail] = useState(false);
   const [companyName, setCompanyName] = useState("");
   const [contactName, setContactName] = useState("");
   const [jobTitle, setJobTitle] = useState("");
@@ -231,6 +238,40 @@ export default function CrmPage() {
     }
   }
 
+  function openEmailComposer(lead: Lead) {
+    setActionError("");
+    setActionNotice("");
+    setEmailSendError("");
+    setEmailSubject("");
+    setEmailText("");
+    setEmailComposerLead(lead);
+  }
+
+  async function handleSendEmail(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!emailComposerLead) return;
+    setSendingEmail(true);
+    setEmailSendError("");
+    setActionNotice("");
+    try {
+      const result = await sendLeadEmail(
+        emailComposerLead.id,
+        emailSubject,
+        emailText,
+      );
+      setLeads((current) =>
+        current.map((item) => item.id === result.lead.id ? result.lead : item),
+      );
+      setStats(await getCrmStats());
+      setEmailComposerLead(null);
+      setActionNotice(`Email sent to ${result.lead.email}.`);
+    } catch (error: unknown) {
+      setEmailSendError(error instanceof Error ? error.message : "Could not send email.");
+    } finally {
+      setSendingEmail(false);
+    }
+  }
+
   async function handleScore(lead: Lead) {
     setScoringId(lead.id);
     setActionError("");
@@ -309,6 +350,11 @@ export default function CrmPage() {
         {actionError && (
           <div role="alert" className="mb-5 rounded-xl border border-rose-400/20 bg-rose-400/[0.07] p-4 text-sm text-rose-200">
             {actionError}
+          </div>
+        )}
+        {actionNotice && (
+          <div role="status" className="mb-5 rounded-xl border border-emerald-300/20 bg-emerald-300/[0.06] p-4 text-sm text-emerald-200">
+            {actionNotice}
           </div>
         )}
 
@@ -466,7 +512,7 @@ export default function CrmPage() {
               <span className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] text-white/45">{leads.length} records</span>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px] text-left text-xs">
+              <table className="w-full min-w-[820px] text-left text-xs">
                 <thead className="text-[10px] uppercase tracking-wider text-white/35">
                   <tr className="border-b border-white/[0.06]">
                     <th className="px-5 py-3 font-medium">Company / contact</th>
@@ -527,6 +573,18 @@ export default function CrmPage() {
                         <div className="flex justify-end gap-2">
                           {!protectedStatuses.has(lead.status) && (
                             <>
+                              {lead.email &&
+                                emailStatus?.outboundConfigured &&
+                                (lead.status === "READY_TO_CONTACT" || lead.status === "FOLLOW_UP") && (
+                                  <button
+                                    type="button"
+                                    disabled={sendingEmail}
+                                    onClick={() => openEmailComposer(lead)}
+                                    className="rounded-lg border border-emerald-300/20 px-2.5 py-1.5 text-[10px] text-emerald-200 transition hover:bg-emerald-300/10 disabled:opacity-40"
+                                  >
+                                    Email
+                                  </button>
+                                )}
                               <button
                                 type="button"
                                 disabled={scoringId === lead.id}
@@ -626,16 +684,99 @@ export default function CrmPage() {
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-white/45">Outbound sending</span>
-                  <span className="text-white/35">Not configured</span>
+                  <span className={emailStatus?.outboundConfigured ? "text-emerald-300" : "text-amber-200"}>
+                    {emailStatus ? (emailStatus.outboundConfigured ? "Configured" : "Setup required") : "Checking"}
+                  </span>
                 </div>
                 <p className="border-t border-white/[0.06] pt-3 text-[11px] leading-5 text-white/35">
-                  Inbound Worker events are signature-verified. Outbound email is intentionally disabled until a provider and compliance controls are configured.
+                  Inbound Worker events are signature-verified. Outbound email is manual and one recipient at a time; only READY_TO_CONTACT and FOLLOW_UP leads can be emailed.
                 </p>
+                {!emailStatus?.outboundConfigured && (
+                  <p className="text-[11px] leading-5 text-white/35">
+                    Configure Brevo SMTP credentials on the backend, then refresh this page.
+                  </p>
+                )}
               </div>
             </section>
           </aside>
         </div>
       </div>
+      {emailComposerLead && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4">
+          <section
+            aria-labelledby="email-composer-heading"
+            aria-modal="true"
+            role="dialog"
+            className="w-full max-w-xl rounded-2xl border border-white/10 bg-[#0b0e15] p-5 shadow-2xl"
+          >
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h2 id="email-composer-heading" className="text-base font-semibold">Compose email</h2>
+                <p className="mt-1 text-xs text-white/45">
+                  To {emailComposerLead.contactName || emailComposerLead.companyName} · {emailComposerLead.email}
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={sendingEmail}
+                onClick={() => setEmailComposerLead(null)}
+                className="rounded-lg px-2 py-1 text-xs text-white/50 hover:bg-white/5 hover:text-white disabled:opacity-40"
+              >
+                Close
+              </button>
+            </div>
+            {emailSendError && (
+              <p role="alert" className="mb-4 rounded-lg border border-rose-400/20 bg-rose-400/[0.07] p-3 text-xs text-rose-200">
+                {emailSendError}
+              </p>
+            )}
+            <form onSubmit={(event) => void handleSendEmail(event)} className="space-y-4">
+              <label className="block text-xs text-white/55">
+                Subject
+                <input
+                  required
+                  maxLength={200}
+                  value={emailSubject}
+                  onChange={(event) => setEmailSubject(event.target.value)}
+                  className="mt-1.5 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none focus:border-cyan-300/40"
+                />
+              </label>
+              <label className="block text-xs text-white/55">
+                Message
+                <textarea
+                  required
+                  maxLength={10000}
+                  rows={9}
+                  value={emailText}
+                  onChange={(event) => setEmailText(event.target.value)}
+                  className="mt-1.5 w-full resize-y rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-sm leading-6 text-white outline-none focus:border-cyan-300/40"
+                />
+              </label>
+              <p className="text-[11px] leading-5 text-white/35">
+                Review the recipient and message before sending. This sends one email immediately.
+              </p>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={sendingEmail}
+                  onClick={() => setEmailComposerLead(null)}
+                  className="rounded-lg border border-white/10 px-3 py-2 text-xs text-white/60 hover:bg-white/5 disabled:opacity-40"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={sendingEmail || !emailStatus?.outboundConfigured}
+                  className="flex items-center gap-2 rounded-lg bg-cyan-300 px-3 py-2 text-xs font-semibold text-slate-950 transition hover:bg-cyan-200 disabled:cursor-wait disabled:opacity-50"
+                >
+                  {sendingEmail ? <LoaderCircle size={14} className="animate-spin" /> : <Mail size={14} />}
+                  {sendingEmail ? "Sending…" : "Send email"}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
     </main>
   );
 }

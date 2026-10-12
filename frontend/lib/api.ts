@@ -361,6 +361,17 @@ export async function getEmailIntegrationStatus(): Promise<EmailIntegrationStatu
   return apiRequest("/email/cloudflare/status");
 }
 
+export async function sendLeadEmail(
+  leadId: string,
+  subject: string,
+  text: string,
+): Promise<{ success: true; messageId: string; lead: Lead }> {
+  return apiRequest("/email/send", {
+    method: "POST",
+    body: JSON.stringify({ leadId, subject, text }),
+  });
+}
+
 export async function getLeadDiscoveryStatus(): Promise<LeadDiscoveryStatus> {
   return apiRequest("/leads/discovery/status");
 }

@@ -105,5 +105,5 @@ export interface CrmStats {
 
 export interface EmailIntegrationStatus {
   inboundConfigured: boolean;
-  outboundConfigured: false;
+  outboundConfigured: boolean;
 }

@@ -2,6 +2,8 @@
 
 **What works**
 
+- Admin-only, manual Brevo SMTP sending from the CRM to one eligible lead at a time; suppressed leads are excluded, and successful sends update lead contact status and audit history. Email and SMTP settings stay backend-only.
+- Brevo email service and lead service tests passed (10 tests); NestJS backend and Next.js frontend production builds passed.
 - `evaluateBaselineRule`: price > 200 BUY, price < 200 SELL, exactly 200 HOLD
 - Paper trading service, approval arm, no live broker
 - Quote-triggered paper BUY/SELL flow covered by service-level tests

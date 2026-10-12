@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Get,
   Headers,
@@ -10,18 +11,18 @@ import { Request } from "express";
 import { EmailService } from "./email.service";
 import { Public, Roles } from "../auth/auth.decorators";
 
-@Controller("email/cloudflare")
+@Controller("email")
 export class EmailController {
   constructor(private readonly emailService: EmailService) {}
 
   @Roles("admin")
-  @Get("status")
+  @Get("cloudflare/status")
   status() {
     return this.emailService.getStatus();
   }
 
   @Public()
-  @Post("inbound")
+  @Post("cloudflare/inbound")
   receiveInbound(
     @Req() request: RawBodyRequest<Request>,
     @Headers("x-hw-timestamp") timestamp?: string,
@@ -33,5 +34,11 @@ export class EmailController {
       timestamp,
       signature,
     );
+  }
+
+  @Roles("admin")
+  @Post("send")
+  send(@Body() payload: unknown) {
+    return this.emailService.sendLeadEmail(payload);
   }
 }

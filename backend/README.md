@@ -57,6 +57,24 @@ available when the backend reports the key is configured. Never add the key to
 frontend environment variables or paste it into the browser. Provider usage may
 be subject to SerpApi account limits and charges.
 
+## Brevo CRM email sending
+
+Install the backend dependencies with `npm install` from `backend/`, then set
+`BREVO_SMTP_HOST`, `BREVO_SMTP_PORT`, `BREVO_SMTP_USER`, `BREVO_SMTP_KEY`, and
+`BREVO_FROM_EMAIL` in the backend environment (for Render, set them on the
+backend web service). Use the SMTP login and SMTP key from Brevo's transactional
+email settings; the SMTP key is not the Brevo API key. `BREVO_FROM_NAME` is
+optional. The sender address must be verified with Brevo.
+
+After restarting the backend and refreshing the CRM, administrators can compose
+and send an email to one lead at a time. Only leads in `READY_TO_CONTACT` or
+`FOLLOW_UP` status are eligible; sending to a `READY_TO_CONTACT` lead changes
+its status to `CONTACTED`. Suppressed, unsubscribed, bounced, invalid, and
+other ineligible records cannot be emailed. `GET /api/email/cloudflare/status`
+reports whether the SMTP settings are complete, and `POST /api/email/send`
+performs an authenticated send. Keep SMTP credentials server-side and never add
+them to frontend environment variables.
+
 ## Compile and run the project
 
 ```bash
