@@ -22,7 +22,7 @@ export class AuthGuard implements CanActivate {
     private readonly authService: AuthService,
   ) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const isPublic = this.reflector.getAllAndOverride<boolean>(PUBLIC_ROUTE, [
       context.getHandler(),
       context.getClass(),
@@ -36,7 +36,7 @@ export class AuthGuard implements CanActivate {
       .find((part) => part.startsWith('hexawave_session='))
       ?.slice('hexawave_session='.length);
     if (!token) throw new UnauthorizedException('Sign in to continue.');
-    const user = this.authService.verify(token);
+    const user = await this.authService.verify(token);
     request.user = user;
 
     const roles = this.reflector.getAllAndOverride<UserRole[]>(REQUIRED_ROLE, [

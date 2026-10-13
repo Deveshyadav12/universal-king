@@ -32,6 +32,7 @@
     "class-validator": "^0.15.1",
     "cors": "^2.8.6",
     "nodemailer": "^10.1.0",
+    "pg": "^8.23.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "ssh2-sftp-client": "^12.1.1"
@@ -44,6 +45,7 @@
     "@types/express": "^5.0.0",
     "@types/node": "^24.0.0",
     "@types/nodemailer": "^8.0.2",
+    "@types/pg": "^8.23.1",
     "@types/ssh2-sftp-client": "^9.0.6",
     "@types/supertest": "^7.0.0",
     "@vitest/coverage-v8": "^4.1.2",

@@ -14,8 +14,9 @@ import {
   scryptSync,
   timingSafeEqual,
 } from 'node:crypto';
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { DatabaseService } from '../database/database.service';
 
 export type UserRole = 'admin' | 'user';
 export type AccountType = 'individual' | 'company';
@@ -49,6 +50,28 @@ interface StoredCompany {
 interface StoredUserData {
   users: StoredUser[];
   companies: StoredCompany[];
+}
+
+interface UserRow {
+  id: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  accountType: AccountType;
+  workspaceId: string;
+  companyName: string | null;
+  companyRole: CompanyRole | null;
+  salt: string;
+  passwordHash: string;
+  createdAt: Date | string;
+}
+
+interface CompanyRow {
+  id: string;
+  name: string;
+  ownerUserId: string;
+  inviteCodeHash: string;
+  createdAt: Date | string;
 }
 
 function isStoredUser(value: unknown): value is StoredUser {
@@ -85,18 +108,25 @@ function isStoredCompany(value: unknown): value is StoredCompany {
   );
 }
 
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === '23505'
+  );
+}
+
 @Injectable()
 export class UsersService implements OnModuleInit {
-  private users: StoredUser[] = [];
-  private companies: StoredCompany[] = [];
-  private inviteCodes = new Map<string, string>();
-  private loaded = false;
-  private readonly storePath = resolve(
+  private readonly legacyStorePath = resolve(
     process.env.HEXAWAVE_USER_STORE ?? 'data/users.json',
   );
 
-  onModuleInit(): void {
-    this.load();
+  constructor(private readonly database: DatabaseService) {}
+
+  async onModuleInit(): Promise<void> {
+    await this.importLegacyStore();
     const adminEmail = process.env.HEXAWAVE_ADMIN_EMAIL?.trim().toLowerCase();
     const adminPassword = process.env.HEXAWAVE_ADMIN_PASSWORD;
     if (!adminEmail && !adminPassword) return;
@@ -105,22 +135,24 @@ export class UsersService implements OnModuleInit {
         'Configure both HEXAWAVE_ADMIN_EMAIL and a 12-character HEXAWAVE_ADMIN_PASSWORD.',
       );
     }
-    const existing = this.users.find((user) => user.email === adminEmail);
-    if (existing) {
-      if (existing.role !== 'admin') {
+
+    const result = await this.database.query<{ role: UserRole }>(
+      'SELECT role FROM users WHERE email = $1',
+      [adminEmail],
+    );
+    if (result.rows[0]) {
+      if (result.rows[0].role !== 'admin') {
         throw new Error(
           'The configured HEXAWAVE_ADMIN_EMAIL belongs to a non-admin account; refusing implicit role escalation.',
         );
       }
       return;
     }
-    this.users.push(
-      this.makeUser(adminEmail, 'HexaWave Admin', adminPassword, 'admin'),
-    );
-    this.persist();
+    const admin = this.makeUser(adminEmail, 'HexaWave Admin', adminPassword, 'admin');
+    await this.insertUser(admin);
   }
 
-  register(
+  async register(
     emailInput: string,
     nameInput: string,
     password: string,
@@ -129,24 +161,19 @@ export class UsersService implements OnModuleInit {
       companyName?: string;
       inviteCode?: string;
     } = {},
-  ): { user: AuthenticatedUser; companyInviteCode?: string } {
-    this.load();
+  ): Promise<{ user: AuthenticatedUser; companyInviteCode?: string }> {
     const email = emailInput.trim().toLowerCase();
     const name = nameInput.trim();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
       throw new BadRequestException('Enter a valid email address.');
     }
     if (name.length < 2 || name.length > 100) {
-      throw new BadRequestException(
-        'Name must be between 2 and 100 characters.',
-      );
+      throw new BadRequestException('Name must be between 2 and 100 characters.');
     }
     if (password.length < 10 || password.length > 128) {
-      throw new BadRequestException(
-        'Password must be between 10 and 128 characters.',
-      );
+      throw new BadRequestException('Password must be between 10 and 128 characters.');
     }
-    if (this.users.some((user) => user.email === email)) {
+    if ((await this.database.query('SELECT 1 FROM users WHERE email = $1', [email])).rowCount) {
       throw new ConflictException('An account with this email already exists.');
     }
 
@@ -172,7 +199,7 @@ export class UsersService implements OnModuleInit {
           'Use either a company name or an employee invite code.',
         );
       }
-      company = this.findCompanyByInvite(options.inviteCode);
+      company = await this.findCompanyByInvite(options.inviteCode);
       if (!company) {
         throw new BadRequestException('The company invite code is invalid or expired.');
       }
@@ -182,9 +209,7 @@ export class UsersService implements OnModuleInit {
     } else {
       companyName = options.companyName?.trim();
       if (!companyName || companyName.length > 120) {
-        throw new BadRequestException(
-          'Company name must be between 1 and 120 characters.',
-        );
+        throw new BadRequestException('Company name must be between 1 and 120 characters.');
       }
       workspaceId = randomUUID();
       companyRole = 'owner';
@@ -204,85 +229,140 @@ export class UsersService implements OnModuleInit {
       ...(companyName ? { companyName } : {}),
       ...(companyRole ? { companyRole } : {}),
     });
-    if (companyRole === 'owner' && company) {
-      company.ownerUserId = user.id;
-      this.companies.push(company);
+    try {
+      await this.database.transaction(async (client) => {
+        await client.query(
+          `INSERT INTO users
+            (id, email, name, role, account_type, workspace_id, company_name,
+             company_role, password_salt, password_hash, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+          this.userValues(user),
+        );
+        if (companyRole === 'owner' && company) {
+          company.ownerUserId = user.id;
+          await client.query(
+            `INSERT INTO companies (id, name, owner_user_id, invite_code_hash, created_at)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [
+              company.id,
+              company.name,
+              company.ownerUserId,
+              company.inviteCodeHash,
+              company.createdAt,
+            ],
+          );
+        }
+      });
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new ConflictException('An account with this email already exists.');
+      }
+      throw error;
     }
-    this.users.push(user);
-    this.persist();
+
     return {
       user: this.publicUser(user),
       ...(companyInviteCode ? { companyInviteCode } : {}),
     };
   }
 
-  authenticate(emailInput: string, password: string): AuthenticatedUser {
-    this.load();
-    const user = this.users.find(
-      (entry) => entry.email === emailInput.trim().toLowerCase(),
+  async authenticate(emailInput: string, password: string): Promise<AuthenticatedUser> {
+    const result = await this.database.query<UserRow>(
+      `SELECT id, email, name, role, account_type AS "accountType",
+              workspace_id AS "workspaceId", company_name AS "companyName",
+              company_role AS "companyRole", password_salt AS salt,
+              password_hash AS "passwordHash", created_at AS "createdAt"
+       FROM users WHERE email = $1`,
+      [emailInput.trim().toLowerCase()],
     );
-    if (!user || !this.passwordMatches(user, password)) {
+    const row = result.rows[0];
+    if (!row || !this.passwordMatches(this.toStoredUser(row), password)) {
       throw new UnauthorizedException('Email or password is incorrect.');
     }
-    return this.publicUser(user);
+    return this.publicUser(this.toStoredUser(row));
   }
 
-  findById(id: string): AuthenticatedUser | undefined {
-    this.load();
-    const user = this.users.find((entry) => entry.id === id);
-    return user ? this.publicUser(user) : undefined;
+  async findById(id: string): Promise<AuthenticatedUser | undefined> {
+    const result = await this.database.query<UserRow>(
+      `SELECT id, email, name, role, account_type AS "accountType",
+              workspace_id AS "workspaceId", company_name AS "companyName",
+              company_role AS "companyRole", password_salt AS salt,
+              password_hash AS "passwordHash", created_at AS "createdAt"
+       FROM users WHERE id = $1`,
+      [id],
+    );
+    return result.rows[0]
+      ? this.publicUser(this.toStoredUser(result.rows[0]))
+      : undefined;
   }
 
-  getCompany(userId: string): {
+  async getCompany(userId: string): Promise<{
     id: string;
     name: string;
     isOwner: boolean;
     memberCount: number;
     employees?: Array<{ name: string; email: string }>;
-  } | null {
-    this.load();
-    const user = this.users.find((entry) => entry.id === userId);
+  } | null> {
+    const userResult = await this.database.query<Pick<UserRow, 'id' | 'accountType' | 'workspaceId'>>(
+      `SELECT id, account_type AS "accountType", workspace_id AS "workspaceId"
+       FROM users WHERE id = $1`,
+      [userId],
+    );
+    const user = userResult.rows[0];
     if (!user || user.accountType !== 'company') return null;
-    const company = this.companies.find(
-      (entry) => entry.id === user.workspaceId,
+
+    const companyResult = await this.database.query<CompanyRow>(
+      `SELECT id, name, owner_user_id AS "ownerUserId",
+              invite_code_hash AS "inviteCodeHash", created_at AS "createdAt"
+       FROM companies WHERE id = $1`,
+      [user.workspaceId],
     );
+    const company = companyResult.rows[0];
     if (!company) return null;
-    const members = this.users.filter(
-      (entry) => entry.workspaceId === company.id,
-    );
     const isOwner = company.ownerUserId === user.id;
-    return {
+    const members = await this.database.query<{ count: string }>(
+      'SELECT COUNT(*)::text AS count FROM users WHERE workspace_id = $1',
+      [company.id],
+    );
+    const response = {
       id: company.id,
       name: company.name,
       isOwner,
-      memberCount: members.length,
-      ...(isOwner
-        ? {
-            employees: members
-              .filter((entry) => entry.id !== company.ownerUserId)
-              .map((entry) => ({ name: entry.name, email: entry.email })),
-          }
-        : {}),
+      memberCount: Number(members.rows[0]?.count ?? 0),
     };
+    if (!isOwner) return response;
+    const employees = await this.database.query<{ name: string; email: string }>(
+      `SELECT name, email FROM users
+       WHERE workspace_id = $1 AND id <> $2 ORDER BY created_at, id`,
+      [company.id, company.ownerUserId],
+    );
+    return { ...response, employees: employees.rows };
   }
 
-  rotateCompanyInvite(userId: string): { company: string; inviteCode: string } {
-    this.load();
-    const user = this.users.find((entry) => entry.id === userId);
-    if (!user || user.accountType !== 'company' || user.companyRole !== 'owner') {
+  async rotateCompanyInvite(
+    userId: string,
+  ): Promise<{ company: string; inviteCode: string }> {
+    const result = await this.database.query<{
+      id: string;
+      name: string;
+      companyRole: CompanyRole | null;
+    }>(
+      `SELECT c.id, c.name, u.company_role AS "companyRole"
+       FROM users u JOIN companies c ON c.id = u.workspace_id
+       WHERE u.id = $1 AND u.account_type = 'company'`,
+      [userId],
+    );
+    const company = result.rows[0];
+    if (!company || company.companyRole !== 'owner') {
       throw new ForbiddenException(
         'Only the company CEO can manage employee invite codes.',
       );
     }
-    const company = this.companies.find(
-      (entry) => entry.id === user.workspaceId,
-    );
-    if (!company) {
-      throw new NotFoundException('Company workspace not found.');
-    }
     const inviteCode = randomBytes(24).toString('hex');
-    company.inviteCodeHash = this.hashInviteCode(inviteCode);
-    this.persist();
+    await this.database.query(
+      'UPDATE companies SET invite_code_hash = $1 WHERE id = $2',
+      [this.hashInviteCode(inviteCode), company.id],
+    );
     return { company: company.name, inviteCode };
   }
 
@@ -314,12 +394,53 @@ export class UsersService implements OnModuleInit {
     };
   }
 
+  private async insertUser(user: StoredUser): Promise<void> {
+    await this.database.query(
+      `INSERT INTO users
+        (id, email, name, role, account_type, workspace_id, company_name,
+         company_role, password_salt, password_hash, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      this.userValues(user),
+    );
+  }
+
+  private userValues(user: StoredUser): unknown[] {
+    return [
+      user.id,
+      user.email,
+      user.name,
+      user.role,
+      user.accountType ?? 'individual',
+      user.workspaceId ?? user.id,
+      user.companyName ?? null,
+      user.companyRole ?? null,
+      user.salt,
+      user.passwordHash,
+      user.createdAt,
+    ];
+  }
+
+  private toStoredUser(row: UserRow): StoredUser {
+    return {
+      id: row.id,
+      email: row.email,
+      name: row.name,
+      role: row.role,
+      accountType: row.accountType,
+      workspaceId: row.workspaceId,
+      ...(row.companyName ? { companyName: row.companyName } : {}),
+      ...(row.companyRole ? { companyRole: row.companyRole } : {}),
+      salt: row.salt,
+      passwordHash: row.passwordHash,
+      createdAt:
+        row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
+    };
+  }
+
   private passwordMatches(user: StoredUser, password: string): boolean {
     const actual = scryptSync(password, user.salt, 64);
     const expected = Buffer.from(user.passwordHash, 'hex');
-    return (
-      actual.length === expected.length && timingSafeEqual(actual, expected)
-    );
+    return actual.length === expected.length && timingSafeEqual(actual, expected);
   }
 
   private publicUser(user: StoredUser): AuthenticatedUser {
@@ -335,42 +456,10 @@ export class UsersService implements OnModuleInit {
     };
   }
 
-  private load(): void {
-    if (this.loaded) return;
+  private async importLegacyStore(): Promise<void> {
+    let parsed: unknown;
     try {
-      const parsed: unknown = JSON.parse(readFileSync(this.storePath, 'utf8'));
-      if (Array.isArray(parsed)) {
-        if (!parsed.every(isStoredUser)) {
-          throw new Error('User store has an invalid format.');
-        }
-        this.users = parsed.map((user) => ({
-          ...user,
-          accountType: user.accountType ?? 'individual',
-          workspaceId: user.workspaceId ?? user.id,
-        }));
-        this.companies = [];
-        this.loaded = true;
-        return;
-      }
-      if (typeof parsed !== 'object' || parsed === null) {
-        throw new Error('User store has an invalid format.');
-      }
-      const stored = parsed as Partial<StoredUserData>;
-      if (
-        !Array.isArray(stored.users) ||
-        !stored.users.every(isStoredUser) ||
-        !Array.isArray(stored.companies) ||
-        !stored.companies.every(isStoredCompany)
-      ) {
-        throw new Error('User store has an invalid format.');
-      }
-      this.users = stored.users.map((user) => ({
-        ...user,
-        accountType: user.accountType ?? 'individual',
-        workspaceId: user.workspaceId ?? user.id,
-      }));
-      this.companies = stored.companies;
-      this.loaded = true;
+      parsed = JSON.parse(readFileSync(this.legacyStorePath, 'utf8'));
     } catch (error) {
       if (
         typeof error === 'object' &&
@@ -378,38 +467,91 @@ export class UsersService implements OnModuleInit {
         'code' in error &&
         error.code === 'ENOENT'
       ) {
-        this.loaded = true;
         return;
       }
-      throw new Error('Could not load the HexaWave user store.', {
+      throw new Error('Could not read the legacy HexaWave user store.', {
         cause: error,
       });
     }
+
+    let users: StoredUser[];
+    let companies: StoredCompany[];
+    if (Array.isArray(parsed)) {
+      users = parsed.filter(isStoredUser);
+      companies = [];
+      if (users.length !== parsed.length) {
+        throw new Error('Legacy user store has an invalid format.');
+      }
+    } else if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      'users' in parsed &&
+      'companies' in parsed &&
+      Array.isArray(parsed.users) &&
+      Array.isArray(parsed.companies) &&
+      parsed.users.every(isStoredUser) &&
+      parsed.companies.every(isStoredCompany)
+    ) {
+      users = parsed.users;
+      companies = parsed.companies;
+    } else {
+      throw new Error('Legacy user store has an invalid format.');
+    }
+
+    if (users.length === 0 && companies.length === 0) return;
+    await this.database.transaction(async (client) => {
+      const count = await client.query<{ count: string }>(
+        'SELECT COUNT(*)::text AS count FROM users',
+      );
+      if (Number(count.rows[0]?.count ?? 0) > 0) return;
+      for (const user of users) {
+        const normalized = {
+          ...user,
+          accountType: user.accountType ?? 'individual',
+          workspaceId: user.workspaceId ?? user.id,
+        };
+        await client.query(
+          `INSERT INTO users
+            (id, email, name, role, account_type, workspace_id, company_name,
+             company_role, password_salt, password_hash, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+          this.userValues(normalized),
+        );
+      }
+      for (const company of companies) {
+        await client.query(
+          `INSERT INTO companies (id, name, owner_user_id, invite_code_hash, created_at)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [
+            company.id,
+            company.name,
+            company.ownerUserId,
+            company.inviteCodeHash,
+            company.createdAt,
+          ],
+        );
+      }
+    });
   }
 
-  private persist(): void {
-    mkdirSync(dirname(this.storePath), { recursive: true });
-    const temporaryPath = `${this.storePath}.${randomBytes(6).toString('hex')}.tmp`;
-    writeFileSync(
-      temporaryPath,
-      JSON.stringify({ users: this.users, companies: this.companies }, null, 2),
-      { encoding: 'utf8', mode: 0o600 },
-    );
-    renameSync(temporaryPath, this.storePath);
-  }
-
-  private findCompanyByInvite(inviteCode: string): StoredCompany | undefined {
+  private async findCompanyByInvite(inviteCode: string): Promise<StoredCompany | undefined> {
     const normalisedCode = inviteCode.trim().toLowerCase();
     if (!/^[a-f0-9]{48}$/.test(normalisedCode)) return undefined;
-    const candidateHash = this.hashInviteCode(normalisedCode);
-    return this.companies.find((company) => {
-      const storedHash = Buffer.from(company.inviteCodeHash, 'hex');
-      const suppliedHash = Buffer.from(candidateHash, 'hex');
-      return (
-        storedHash.length === suppliedHash.length &&
-        timingSafeEqual(storedHash, suppliedHash)
-      );
-    });
+    const result = await this.database.query<CompanyRow>(
+      `SELECT id, name, owner_user_id AS "ownerUserId",
+              invite_code_hash AS "inviteCodeHash", created_at AS "createdAt"
+       FROM companies WHERE invite_code_hash = $1`,
+      [this.hashInviteCode(normalisedCode)],
+    );
+    const company = result.rows[0];
+    if (!company) return undefined;
+    return {
+      ...company,
+      createdAt:
+        company.createdAt instanceof Date
+          ? company.createdAt.toISOString()
+          : company.createdAt,
+    };
   }
 
   private hashInviteCode(inviteCode: string): string {

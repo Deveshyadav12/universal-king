@@ -8,11 +8,23 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 <!-- cloude-code-toolbox:mcp-skills-awareness-begin -->
 
-### MCP & Skills awareness (Cloude Code ToolBox)
+### MCP & Skills awareness (Claude Code ToolBox)
 
-_Last synced: 2026-10-10T06:54:52.679Z._
+_Last synced: 2026-10-13T03:24:52.329Z._
 
 - **Full report:** `.claude/cloude-code-toolbox-mcp-skills-awareness.md` in this workspace (auto-overwritten on each scan). Use it as ground truth for configured servers and skill folders.
 - **MCP:** For **live tools** in Claude Code, enable the matching server via `/mcp`. Servers are configured in `~/.claude.json` (user) and `.mcp.json` (project).
@@ -97,7 +109,25 @@ _None found (or no workspace open)._
 
 - **python-appservice-deploy** — `C:\Users\dy882\.agents\skills\python-appservice-deploy` — Deploy Python (Flask/Django/FastAPI) code to Azure App Service Linux. WHEN: \"Flask App Service\", \"Django App Service\", \"FastAPI App Service\", \"deploy Python to App Service\". DO NOT USE FOR: Container Apps, Functi
 
+- **tavily-best-practices** — `C:\Users\dy882\.agents\skills\tavily-best-practices` — Build production-ready Tavily integrations with best practices baked in. Reference documentation for developers using coding assistants (Claude Code, Cursor, etc.) to implement web search, content extraction, crawling, a
+
+- **tavily-cli** — `C:\Users\dy882\.agents\skills\tavily-cli` — |
+
+- **tavily-crawl** — `C:\Users\dy882\.agents\skills\tavily-crawl` — |
+
+- **tavily-dynamic-search** — `C:\Users\dy882\.agents\skills\tavily-dynamic-search` — |
+
+- **tavily-extract** — `C:\Users\dy882\.agents\skills\tavily-extract` — |
+
+- **tavily-map** — `C:\Users\dy882\.agents\skills\tavily-map` — |
+
+- **tavily-research** — `C:\Users\dy882\.agents\skills\tavily-research` — |
+
+- **tavily-search** — `C:\Users\dy882\.agents\skills\tavily-search` — |
+
 <!-- cloude-code-toolbox:mcp-skills-awareness-end -->
+
+
 <!-- claude-code-memory-bank:begin -->
 # Memory bank (persistent context)
 
@@ -125,6 +155,17 @@ Context layers (read deeper files after foundations): **projectbrief** → **pro
 
 Do not delete these files; evolve them as the project changes.
 <!-- claude-code-memory-bank:end -->
+
+
+
+
+
+
+
+
+
+
+
 
 
 

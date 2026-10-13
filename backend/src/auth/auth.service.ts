@@ -25,7 +25,7 @@ export class AuthService {
       companyName?: string;
       inviteCode?: string;
     } = {},
-  ): { user: AuthenticatedUser; companyInviteCode?: string } {
+  ): Promise<{ user: AuthenticatedUser; companyInviteCode?: string }> {
     return this.usersService.register(email, name, password, options);
   }
 
@@ -37,14 +37,14 @@ export class AuthService {
     return this.usersService.rotateCompanyInvite(userId);
   }
 
-  login(
+  async login(
     email: string,
     password: string,
-  ): {
+  ): Promise<{
     user: AuthenticatedUser;
     token: string;
-  } {
-    const user = this.usersService.authenticate(email, password);
+  }> {
+    const user = await this.usersService.authenticate(email, password);
     const payload = Buffer.from(
       JSON.stringify({
         sub: user.id,
@@ -55,7 +55,7 @@ export class AuthService {
     return { user, token: `${payload}.${signature}` };
   }
 
-  verify(token: string): AuthenticatedUser {
+  async verify(token: string): Promise<AuthenticatedUser> {
     const [payload, signature, extra] = token.split('.');
     if (!payload || !signature || extra) {
       throw new UnauthorizedException('Invalid or expired session.');
@@ -85,7 +85,7 @@ export class AuthService {
     ) {
       throw new UnauthorizedException('Invalid or expired session.');
     }
-    const user = this.usersService.findById(decoded.sub);
+    const user = await this.usersService.findById(decoded.sub);
     if (!user) throw new UnauthorizedException('Invalid or expired session.');
     return user;
   }

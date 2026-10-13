@@ -1,6 +1,6 @@
-# Cloude Code ToolBox — MCP & Skills awareness
+# Claude Code ToolBox — MCP & Skills awareness
 
-_Generated: 2026-10-10T06:54:52.220Z_
+_Generated: 2026-10-13T03:24:52.154Z_
 
 ## How to use this report
 
@@ -122,6 +122,30 @@ _None found (or no workspace open)._
 - **python-appservice-deploy** — `C:\Users\dy882\.agents\skills\python-appservice-deploy`
   - Deploy Python (Flask/Django/FastAPI) code to Azure App Service Linux. WHEN: \"Flask App Service\", \"Django App Service\", \"FastAPI App Service\", \"deploy Python to App Service\". DO NOT USE FOR: Container Apps, Functi
 
+- **tavily-best-practices** — `C:\Users\dy882\.agents\skills\tavily-best-practices`
+  - Build production-ready Tavily integrations with best practices baked in. Reference documentation for developers using coding assistants (Claude Code, Cursor, etc.) to implement web search, content extraction, crawling, a
+
+- **tavily-cli** — `C:\Users\dy882\.agents\skills\tavily-cli`
+  - |
+
+- **tavily-crawl** — `C:\Users\dy882\.agents\skills\tavily-crawl`
+  - |
+
+- **tavily-dynamic-search** — `C:\Users\dy882\.agents\skills\tavily-dynamic-search`
+  - |
+
+- **tavily-extract** — `C:\Users\dy882\.agents\skills\tavily-extract`
+  - |
+
+- **tavily-map** — `C:\Users\dy882\.agents\skills\tavily-map`
+  - |
+
+- **tavily-research** — `C:\Users\dy882\.agents\skills\tavily-research`
+  - |
+
+- **tavily-search** — `C:\Users\dy882\.agents\skills\tavily-search`
+  - |
+
 ---
 
 ## Suggested next steps
@@ -130,4 +154,4 @@ _None found (or no workspace open)._
 - **Edit config:** Open `~/.claude.json` (user MCP) or `<workspace>/.mcp.json` (project MCP) via the extension commands.
 - **Refresh this report:** run **Intelligence — scan MCP & Skills awareness** again after changing MCP config or adding skills.
 
-_Report from Cloude Code ToolBox extension._
+_Report from Claude Code ToolBox extension._

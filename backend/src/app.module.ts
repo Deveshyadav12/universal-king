@@ -8,10 +8,12 @@ import { KingModule } from "./king/king.module";
 import { LeadsModule } from "./leads/leads.module";
 import { ProjectsModule } from "./projects/projects.module";
 import { TradingModule } from "./trading/trading.module";
+import { DatabaseModule } from "./database/database.module";
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    DatabaseModule,
     AuthModule,
     ProjectsModule,
     AiModule,

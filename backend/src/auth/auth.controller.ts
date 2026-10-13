@@ -34,7 +34,7 @@ export class AuthController {
 
   @Public()
   @Post('register')
-  register(
+  async register(
     @Body() body: RegistrationInput,
     @Res({ passthrough: true }) response: Response,
   ) {
@@ -45,7 +45,7 @@ export class AuthController {
     ) {
       throw new BadRequestException('Email, name, and password are required.');
     }
-    const registration = this.authService.register(
+    const registration = await this.authService.register(
       body.email,
       body.name,
       body.password,
@@ -55,7 +55,7 @@ export class AuthController {
         inviteCode: body.inviteCode,
       },
     );
-    const login = this.authService.login(body.email, body.password);
+    const login = await this.authService.login(body.email, body.password);
     this.setSessionCookie(response, login.token);
     return {
       success: true,
@@ -69,14 +69,14 @@ export class AuthController {
   @Public()
   @HttpCode(200)
   @Post('login')
-  login(
+  async login(
     @Body() body: LoginInput,
     @Res({ passthrough: true }) response: Response,
   ) {
     if (typeof body?.email !== 'string' || typeof body?.password !== 'string') {
       throw new BadRequestException('Email and password are required.');
     }
-    const result = this.authService.login(body.email, body.password);
+    const result = await this.authService.login(body.email, body.password);
     this.setSessionCookie(response, result.token);
     return { success: true, user: result.user };
   }
@@ -99,15 +99,15 @@ export class AuthController {
   }
 
   @Get('company')
-  company(@CurrentUser() user: AuthenticatedUser) {
-    return { success: true, company: this.authService.getCompany(user.id) };
+  async company(@CurrentUser() user: AuthenticatedUser) {
+    return { success: true, company: await this.authService.getCompany(user.id) };
   }
 
   @Post('company/invite')
-  rotateCompanyInvite(@CurrentUser() user: AuthenticatedUser) {
+  async rotateCompanyInvite(@CurrentUser() user: AuthenticatedUser) {
     return {
       success: true,
-      ...this.authService.rotateCompanyInvite(user.id),
+      ...(await this.authService.rotateCompanyInvite(user.id)),
     };
   }
 

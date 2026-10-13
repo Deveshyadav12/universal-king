@@ -23,6 +23,10 @@ from app.agents import (
     FastDesignAgent,
 )
 from app.llm import safe_llm_error
+from app.services.ai_database import AIDatabaseService
+from app.services.ai_client_handler import client_handler, offline_handler
+from app.services.ai_offline_middleware import create_ai_offline_middleware, FallbackResponse
+from app.config.ai_config import get_config
 from app.workspace import (
     append_runner_output,
     create_workspace,
@@ -60,6 +64,15 @@ from app.security import is_production_environment, project_execution_block_mess
 
 
 app = FastAPI(title="HexaWave AI", version="0.6.0")
+
+# Initialize services
+ai_database = AIDatabaseService()
+
+# Add AI offline middleware for automatic fallback
+app.add_middleware(create_ai_offline_middleware)
+
+# Global config reference
+config = get_config()
 
 
 @app.middleware("http")
@@ -405,18 +418,37 @@ def _runtime_repair_error_message(error: Exception) -> str:
 
 @app.get("/health")
 def health():
+    # Check AI service availability
+    available_models = client_handler.get_available_models()
+    ai_online = len(available_models) > 0
+    
     return {
         "success": True,
         "service": "hexawave-ai",
         "status": "online",
-        "version": "0.6.0",
+        "version": "0.7.0",
         "workspaces": len(list_workspaces()),
+        "ai_online": ai_online,
+        "ai_models": available_models,
+        "database_enabled": ai_database.connection_pool is not None,
+        "auto_discovery_enabled": config.auto_discovery_enabled,
     }
 
 
 @app.post("/lead/score")
-def lead_score(request: LeadScoreRequest):
-    return score_lead(request.lead)
+async def lead_score(request: LeadScoreRequest):
+    """Score a lead using AI with automatic offline fallback"""
+    try:
+        # Try to use AI client handler first
+        result = await offline_handler.execute_with_fallback(
+            "score",
+            request.lead
+        )
+        return result
+    except Exception as e:
+        # Fallback to heuristic scoring if AI fails
+        print(f"AI lead scoring failed, using fallback: {e}")
+        return score_lead(request.lead)
 
 
 # ── Generate ──────────────────────────────────────────────────────────────────
