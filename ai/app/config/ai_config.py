@@ -5,9 +5,8 @@ Central configuration for AI services, models, and behaviors
 
 import os
 from typing import Dict, Any, Optional
-from dataclasses import dataclass
 
-
+from dataclasses import dataclass, field
 @dataclass
 class AIConfig:
     """AI Service Configuration"""
@@ -35,7 +34,7 @@ class AIConfig:
     discovery_queries_per_day: int = 20
     
     # AI Models
-    available_models: Dict[str, Any] = None
+    available_models: Dict[str, Any] = field(default_factory=dict)
     primary_model: str = "hexawave-local"
     fallback_model: str = "offline"
     
@@ -53,7 +52,12 @@ class AIConfig:
     
     # Security
     require_auth: bool = True
-    allowed_origins: list = ["*"]
+   allowed_origins: List[str] = field(
+    default_factory=lambda: [
+        "https://jaipurstore.tech",
+        "https://www.jaipurstore.tech",
+    ]
+)
     
     def __post_init__(self):
         """Post-initialization configuration"""
