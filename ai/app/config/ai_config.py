@@ -4,8 +4,7 @@ Central configuration for AI services, models, and behaviors
 """
 
 import os
-from typing import Dict, Any, Optional
-
+from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, field
 @dataclass
 class AIConfig:
@@ -50,14 +49,14 @@ class AIConfig:
     offline_mode: bool = False
     fallback_strategy: str = "template"  # template, mock, error
     
-    # Security
+        # Security
     require_auth: bool = True
-   allowed_origins: List[str] = field(
-    default_factory=lambda: [
-        "https://jaipurstore.tech",
-        "https://www.jaipurstore.tech",
-    ]
-)
+    allowed_origins: List[str] = field(
+        default_factory=lambda: [
+            "https://jaipurstore.tech",
+            "https://www.jaipurstore.tech",
+        ]
+    )
     
     def __post_init__(self):
         """Post-initialization configuration"""
