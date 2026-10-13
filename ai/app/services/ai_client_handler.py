@@ -34,9 +34,10 @@ class AIModel:
 class ClientRequest:
     """Represents a client request for AI processing"""
     request_id: str
+    prompt: str
+
     client_id: Optional[str] = None
     user_id: Optional[str] = None
-    prompt: str
     model_preference: Optional[str] = None
     priority: int = 1
     timestamp: datetime = field(default_factory=datetime.now)
