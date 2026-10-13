@@ -340,7 +340,7 @@ export class AutoDiscoveryService implements OnModuleInit, OnModuleDestroy {
           "SELECT 1 FROM leads WHERE email = $1 LIMIT 1",
           [lead.email.toLowerCase()]
         );
-        if (result.rowCount > 0) return true;
+        if ((result.rowCount ?? 0) > 0) return true;
       }
       
       if (lead.website) {
@@ -349,7 +349,7 @@ export class AutoDiscoveryService implements OnModuleInit, OnModuleDestroy {
           "SELECT 1 FROM leads WHERE website LIKE $1 LIMIT 1",
           [`%${domain}%`]
         );
-        if (result.rowCount > 0) return true;
+        if ((result.rowCount ?? 0) > 0) return true;
       }
       
       return false;
