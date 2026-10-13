@@ -1,3 +1,67 @@
+"""
+Middleware for handling AI service offline scenarios.
+Provides AI availability checks and status headers.
+"""
+
+import os
+import time
+from datetime import datetime
+
+import httpx
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
+
+
+class AIOfflineMiddleware(BaseHTTPMiddleware):
+    """Track AI service availability and annotate responses."""
+
+    def __init__(self, app):
+        super().__init__(app)
+        self.last_check: float | None = None
+        self.is_online: bool | None = None
+        self.check_interval = 30.0
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        # Health requests are allowed through the internal-token middleware.
+        if request.url.path == "/health":
+            await self._check_ai_status()
+            response = await call_next(request)
+            response.headers["X-AI-Status"] = (
+                "online" if self.is_online else "offline"
+            )
+            if self.last_check is not None:
+                response.headers["X-AI-Checked"] = str(self.last_check)
+            return response
+
+        current_time = time.time()
+        if (
+            self.last_check is None
+            or current_time - self.last_check > self.check_interval
+        ):
+            await self._check_ai_status()
+
+        response = await call_next(request)
+        response.headers["X-AI-Status"] = (
+            "online" if self.is_online else "offline"
+        )
+        if self.last_check is not None:
+            response.headers["X-AI-Checked"] = str(self.last_check)
+        return response
+
+    async def _check_ai_status(self) -> None:
+        """Check the configured AI service without treating auth failures as online."""
+        self.last_check = time.time()
+        ai_url = os.getenv("HEXAWAVE_AI_URL", "").rstrip("/")
+        token = os.getenv("HEXAWAVE_AI_SERVICE_TOKEN", "")
+
+        # This middleware lives in the AI service itself in the supplied app.
+        # Avoid calling this service's own /health endpoint recursively.
+        if not ai_url or ai_url in {
+            "http://127.0.0.1:8000",
+            "http://localhost:8000",
+        }:
+            self.is_online = True
             return
 
         try:
