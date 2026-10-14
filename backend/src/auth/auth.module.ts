@@ -1,3 +1,4 @@
+
 import { Module } from "@nestjs/common";
 import { APP_GUARD } from "@nestjs/core";
 import { UsersModule } from "../users/users.module";
@@ -16,6 +17,6 @@ import { AuthService } from "./auth.service";
       useExisting: AuthGuard,
     },
   ],
-  exports: [AuthService],
+  exports: [AuthService, AuthGuard],
 })
 export class AuthModule {}
