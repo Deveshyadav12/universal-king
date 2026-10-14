@@ -84,6 +84,13 @@ CREATE TABLE IF NOT EXISTS leads (
   CONSTRAINT valid_lead_score CHECK (lead_score >= 0 AND lead_score <= 100)
 );
 
+-- Idempotent migration for databases where the leads table already existed
+-- before is_verified was added to the schema. Must run before idx_leads_verified
+-- and before get_discovery_stats() references this column.
+ALTER TABLE leads
+  ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE;
+
+
 -- Lead Audit Table for tracking all actions
 CREATE TABLE IF NOT EXISTS lead_audit (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
