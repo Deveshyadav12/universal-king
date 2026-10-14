@@ -49,8 +49,15 @@ export class AutoDiscoveryService implements OnModuleInit, OnModuleDestroy {
     // Initialize database schema for leads if not exists
     await this.initializeDatabase();
     
-    // Start continuous discovery in background
-    this.startContinuousDiscovery();
+    // Check if auto-discovery is enabled in database
+    const isEnabled = await this.isEnabled();
+    
+    // Start continuous discovery in background only if enabled
+    if (isEnabled) {
+      this.startContinuousDiscovery();
+    } else {
+      console.log("Auto discovery is disabled in database settings");
+    }
     
     // Setup cleanup
     this.cleanupInterval = setInterval(() => {
@@ -126,6 +133,40 @@ export class AutoDiscoveryService implements OnModuleInit, OnModuleDestroy {
           metadata JSONB DEFAULT '{}',
           timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         )
+      `);
+
+      // Create discovery settings table
+      await this.database.query(`
+        CREATE TABLE IF NOT EXISTS discovery_settings (
+          id SERIAL PRIMARY KEY,
+          setting_key VARCHAR(100) NOT NULL UNIQUE,
+          setting_value TEXT,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        )
+      `);
+
+      // Create discovery executions table
+      await this.database.query(`
+        CREATE TABLE IF NOT EXISTS discovery_executions (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          execution_type VARCHAR(50) NOT NULL,
+          started_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+          completed_at TIMESTAMP WITH TIME ZONE,
+          leads_added INTEGER DEFAULT 0,
+          leads_skipped INTEGER DEFAULT 0,
+          errors TEXT[],
+          status VARCHAR(20) DEFAULT 'running',
+          error_message TEXT,
+          targets JSONB DEFAULT '{}',
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        )
+      `);
+
+      // Ensure auto_discovery_enabled setting exists
+      await this.database.query(`
+        INSERT INTO discovery_settings (setting_key, setting_value)
+        VALUES ('auto_discovery_enabled', 'true')
+        ON CONFLICT (setting_key) DO NOTHING
       `);
 
       console.log("Lead discovery database initialized");
@@ -474,6 +515,189 @@ export class AutoDiscoveryService implements OnModuleInit, OnModuleDestroy {
       await new Promise((resolve) => setTimeout(resolve, delay));
     }
     return false;
+  }
+
+  // ============================================================================
+  // Settings Management
+  // ============================================================================
+
+  async isEnabled(): Promise<boolean> {
+    try {
+      const result = await this.database.query<{ setting_value: string }>(
+        'SELECT setting_value FROM discovery_settings WHERE setting_key = $1',
+        ['auto_discovery_enabled'],
+      );
+      
+      if (result.rows.length > 0) {
+        return result.rows[0].setting_value.toLowerCase() === 'true';
+      }
+      
+      // Default to enabled
+      return true;
+    } catch (error) {
+      console.error('Error checking discovery enabled setting:', error);
+      return true; // Default to enabled on error
+    }
+  }
+
+  async setEnabled(enabled: boolean): Promise<void> {
+    try {
+      const currentEnabled = await this.isEnabled();
+      
+      if (enabled && !currentEnabled) {
+        // Enable discovery
+        await this.database.query(
+          `INSERT INTO discovery_settings (setting_key, setting_value)
+           VALUES ($1, $2)
+           ON CONFLICT (setting_key) DO UPDATE SET setting_value = $2, updated_at = NOW()`,
+          ['auto_discovery_enabled', 'true'],
+        );
+        
+        // Start if not already running
+        if (!this.isRunning) {
+          this.startContinuousDiscovery();
+        }
+        
+        // Record in execution log
+        await this.database.query(
+          `INSERT INTO discovery_executions (execution_type, status, leads_added, leads_skipped, started_at, completed_at, targets)
+           VALUES ($1, $2, $3, $4, NOW(), NOW(), $5)`,
+          ['admin_toggle', 'completed', 0, 0, JSON.stringify({ action: 'enabled' })],
+        );
+        
+        console.log('Auto discovery enabled');
+      } else if (!enabled && currentEnabled) {
+        // Disable discovery
+        await this.database.query(
+          `INSERT INTO discovery_settings (setting_key, setting_value)
+           VALUES ($1, $2)
+           ON CONFLICT (setting_key) DO UPDATE SET setting_value = $2, updated_at = NOW()`,
+          ['auto_discovery_enabled', 'false'],
+        );
+        
+        // Stop if running
+        if (this.isRunning) {
+          this.stop();
+        }
+        
+        // Record in execution log
+        await this.database.query(
+          `INSERT INTO discovery_executions (execution_type, status, leads_added, leads_skipped, started_at, completed_at, targets)
+           VALUES ($1, $2, $3, $4, NOW(), NOW(), $5)`,
+          ['admin_toggle', 'completed', 0, 0, JSON.stringify({ action: 'disabled' })],
+        );
+        
+        console.log('Auto discovery disabled');
+      }
+    } catch (error) {
+      console.error('Error updating discovery setting:', error);
+      throw error;
+    }
+  }
+
+  async getSettings(): Promise<{
+    isRunning: boolean;
+    isEnabled: boolean;
+    dailyLeadsAdded: number;
+    dailyLeadLimit: number;
+    queueSize: number;
+    activeQueries: number;
+    dailyDate: string;
+  }> {
+    const isEnabled = await this.isEnabled();
+    
+    return {
+      isRunning: this.isRunning,
+      isEnabled,
+      dailyLeadsAdded: this.dailyLeadsAdded,
+      dailyLeadLimit: DAILY_LEAD_LIMIT,
+      queueSize: this.processingQueue.length,
+      activeQueries: this.activeQueries,
+      dailyDate: this.dailyDate,
+    };
+  }
+
+  // ============================================================================
+  // Manual Discovery Execution
+  // ============================================================================
+
+  async executeManualDiscovery(targets?: DiscoveryTarget[]): Promise<{
+    success: boolean;
+    leadsAdded: number;
+    leadsSkipped: number;
+    errors: string[];
+  }> {
+    try {
+      const executionId = randomUUID();
+      const startTime = new Date();
+      let leadsAdded = 0;
+      let leadsSkipped = 0;
+      const errors: string[] = [];
+      
+      // Record start
+      await this.database.query(
+        `INSERT INTO discovery_executions (id, execution_type, started_at, status)
+         VALUES ($1, $2, $3, $4)`,
+        [executionId, 'manual', startTime, 'running'],
+      );
+      
+      // Use provided targets or generate from configured industries
+      const targetsToProcess = targets || this.processingQueue.slice(0, CONURRENT_QUERIES);
+      
+      for (const target of targetsToProcess) {
+        try {
+          const results = await this.searchWeb(this.buildSearchQuery(target), target.market);
+          
+          for (const result of results) {
+            const lead = this.toLeadInput(result, target);
+            if (!lead) {
+              leadsSkipped++;
+              continue;
+            }
+            
+            // Check if lead already exists
+            const exists = await this.leadExists(lead);
+            if (exists) {
+              leadsSkipped++;
+              continue;
+            }
+            
+            // Save to database
+            await this.saveLead(lead);
+            leadsAdded++;
+            
+            // Enrich with AI (fire and forget)
+            this.enrichLeadWithAI(lead).catch(console.error);
+          }
+        } catch (error) {
+          errors.push(error instanceof Error ? error.message : String(error));
+        }
+      }
+      
+      // Record completion
+      await this.database.query(
+        `UPDATE discovery_executions 
+         SET completed_at = NOW(), leads_added = $1, leads_skipped = $2, 
+             errors = $3, status = $4
+         WHERE id = $5`,
+        [leadsAdded, leadsSkipped, JSON.stringify(errors), errors.length > 0 ? 'failed' : 'completed', executionId],
+      );
+      
+      return {
+        success: errors.length === 0,
+        leadsAdded,
+        leadsSkipped,
+        errors,
+      };
+    } catch (error) {
+      console.error('Error in manual discovery:', error);
+      return {
+        success: false,
+        leadsAdded: 0,
+        leadsSkipped: 0,
+        errors: [error instanceof Error ? error.message : String(error)],
+      };
+    }
   }
 
   private resetDailyCountersIfNeeded(): void {

@@ -18,7 +18,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { DatabaseService } from '../database/database.service';
 
-export type UserRole = 'admin' | 'user';
+export type UserRole = 'admin' | 'user' | 'king' | 'super_admin' | 'client';
 export type AccountType = 'individual' | 'company';
 export type CompanyRole = 'owner' | 'employee';
 
@@ -81,7 +81,7 @@ function isStoredUser(value: unknown): value is StoredUser {
     typeof user.id === 'string' &&
     typeof user.email === 'string' &&
     typeof user.name === 'string' &&
-    (user.role === 'admin' || user.role === 'user') &&
+    (user.role === 'admin' || user.role === 'user' || user.role === 'king' || user.role === 'super_admin' || user.role === 'client') &&
     (user.accountType === undefined ||
       user.accountType === 'individual' ||
       user.accountType === 'company') &&
@@ -150,6 +150,20 @@ export class UsersService implements OnModuleInit {
     }
     const admin = this.makeUser(adminEmail, 'HexaWave Admin', adminPassword, 'admin');
     await this.insertUser(admin);
+
+    // Initialize King account if configured
+    const kingEmail = process.env.KING_EMAIL?.trim().toLowerCase();
+    const kingPassword = process.env.KING_PASSWORD;
+    if (kingEmail && kingPassword && kingPassword.length >= 12) {
+      const kingResult = await this.database.query<{ role: UserRole }>(
+        'SELECT role FROM users WHERE email = $1',
+        [kingEmail],
+      );
+      if (!kingResult.rows[0]) {
+        const king = this.makeUser(kingEmail, 'Universal King', kingPassword, 'king');
+        await this.insertUser(king);
+      }
+    }
   }
 
   async register(

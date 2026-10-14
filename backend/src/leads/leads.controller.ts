@@ -18,7 +18,7 @@ import { DiscoveryService, type DiscoveryTargets } from "./discovery.service";
 import { AutoDiscoveryService } from "./auto-discovery.service";
 import { Roles } from "../auth/auth.decorators";
 
-@Roles("admin")
+@Roles("admin", "king", "super_admin")
 @Controller("leads")
 export class LeadsController {
   constructor(
@@ -55,6 +55,22 @@ export class LeadsController {
   @Get("auto-discovery/status")
   autoDiscoveryStatus() {
     return this.autoDiscoveryService.getStatus();
+  }
+
+  @Get("auto-discovery/settings")
+  async autoDiscoverySettings() {
+    return this.autoDiscoveryService.getSettings();
+  }
+
+  @Post("auto-discovery/enable")
+  async enableAutoDiscovery(@Body() body: { enabled: boolean }) {
+    await this.autoDiscoveryService.setEnabled(body.enabled);
+    return { success: true, enabled: body.enabled };
+  }
+
+  @Post("auto-discovery/execute")
+  async executeManualDiscovery() {
+    return this.autoDiscoveryService.executeManualDiscovery();
   }
 
   @Get("ai/status")

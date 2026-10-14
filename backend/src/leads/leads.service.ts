@@ -5,6 +5,21 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
+import { DatabaseService } from "../database/database.service";
+
+// Note: DatabaseService is injected but the original in-memory implementation
+// is kept for backward compatibility. The new auto-discovery.service.ts
+// provides the database-backed lead discovery.
+
+// For the purpose of this implementation, we'll maintain the in-memory service
+// as the existing project uses it. The database-backed lead storage is handled
+// by the auto-discovery.service.ts which already uses the database.
+//
+// This service is kept to maintain backward compatibility with existing endpoints.
+
+// =============================================================================
+// Lead Types and Constants
+// =============================================================================
 
 export const LEAD_STATUSES = [
   "DISCOVERED",
@@ -25,6 +40,7 @@ export const LEAD_STATUSES = [
 ] as const;
 
 export type LeadStatus = (typeof LEAD_STATUSES)[number];
+
 export const LEAD_SIZE_SEGMENTS = ["small", "medium", "large"] as const;
 export type LeadSizeSegment = (typeof LEAD_SIZE_SEGMENTS)[number];
 
@@ -85,6 +101,10 @@ export interface AuditEvent {
   metadata: Record<string, string | number | boolean>;
 }
 
+// =============================================================================
+// Lead Service Implementation
+// =============================================================================
+
 const SUPPRESSED_STATUSES = new Set<LeadStatus>([
   "UNSUBSCRIBED",
   "BOUNCED",
@@ -116,6 +136,92 @@ export class LeadsService {
   private readonly auditEvents: AuditEvent[] = [];
   private nextToken = 1;
 
+  constructor(private readonly database: DatabaseService) {
+    // Initialize from database if available
+    this.initializeFromDatabase().catch(console.error);
+  }
+
+  private async initializeFromDatabase(): Promise<void> {
+    try {
+      // Load existing leads from database
+      const result = await this.database.query(
+        `SELECT id, lead_token AS "leadToken", company_name AS "companyName",
+                contact_name AS "contactName", job_title AS "jobTitle", email, phone,
+                website, industry, company_size AS "companySize",
+                target_size_segment AS "targetSizeSegment", location, source, source_url AS "sourceUrl",
+                linkedin_url AS "linkedinUrl", description, technologies,
+                lead_score AS "leadScore", score_reasons AS "scoreReasons", qualification,
+                status, last_contacted_at AS "lastContactedAt",
+                last_response_at AS "lastResponseAt", next_action_at AS "nextActionAt",
+                email_sequence_id AS "emailSequenceId", created_at AS "createdAt",
+                updated_at AS "updatedAt"
+         FROM leads ORDER BY created_at DESC`,
+      );
+
+      for (const row of result.rows) {
+        const lead: Lead = {
+          id: row.id,
+          leadToken: row.leadToken,
+          companyName: row.companyName,
+          contactName: row.contactName || "",
+          jobTitle: row.jobTitle || "",
+          email: row.email || "",
+          phone: row.phone || "",
+          website: row.website || "",
+          industry: row.industry || "",
+          companySize: row.companySize || "",
+          targetSizeSegment: (row.targetSizeSegment as LeadSizeSegment | "") || "",
+          location: row.location || "",
+          source: row.source,
+          sourceUrl: row.sourceUrl || "",
+          linkedinUrl: row.linkedinUrl || "",
+          description: row.description || "",
+          technologies: Array.isArray(row.technologies) 
+            ? row.technologies 
+            : (typeof row.technologies === 'string' 
+              ? JSON.parse(row.technologies || '[]') 
+              : []),
+          leadScore: row.leadScore || 0,
+          scoreReasons: Array.isArray(row.scoreReasons) 
+            ? row.scoreReasons 
+            : (typeof row.scoreReasons === 'string' 
+              ? JSON.parse(row.scoreReasons || '[]') 
+              : []),
+          qualification: row.qualification || "UNSCORED",
+          status: row.status as LeadStatus,
+          lastContactedAt: row.lastContactedAt,
+          lastResponseAt: row.lastResponseAt,
+          nextActionAt: row.nextActionAt,
+          emailSequenceId: row.emailSequenceId,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+        };
+
+        this.leads.set(lead.id, lead);
+        if (lead.leadToken) {
+          // Also index by token for backward compatibility
+        }
+      }
+
+      // Update nextToken
+      const maxToken = await this.database.query<{ leadToken: string }>(
+        'SELECT lead_token FROM leads ORDER BY lead_token DESC LIMIT 1',
+      );
+      if (maxToken.rows[0]) {
+        const token = maxToken.rows[0].leadToken;
+        const year = new Date().getUTCFullYear();
+        const num = parseInt(token.replace(`HW-${year}-`, ''), 10);
+        if (!isNaN(num)) {
+          this.nextToken = Math.max(this.nextToken, num + 1);
+        }
+      }
+
+      console.log(`Loaded ${result.rows.length} leads from database`);
+    } catch (error) {
+      console.error('Failed to initialize leads from database:', error);
+    }
+  }
+
   list(status?: LeadStatus): Lead[] {
     return Array.from(this.leads.values())
       .filter((lead) => !status || lead.status === status)
@@ -129,7 +235,7 @@ export class LeadsService {
     return lead;
   }
 
-  create(input: CreateLeadInput): Lead {
+  async create(input: CreateLeadInput): Promise<Lead> {
     if (!input || typeof input !== "object" || Array.isArray(input)) {
       throw new BadRequestException("Lead payload must be an object.");
     }
@@ -139,17 +245,21 @@ export class LeadsService {
       throw new BadRequestException("A valid business email address is required.");
     }
     const website = this.optionalText(input.website, "website", 2048);
-    const duplicate = Array.from(this.leads.values()).find((lead) => {
-      if (email && lead.email.toLowerCase() === email) return true;
-      return !email && !lead.email &&
-        this.normalizeCompany(lead.companyName) === this.normalizeCompany(companyName) &&
-        this.normalizeDomain(lead.website) === this.normalizeDomain(website);
-    });
-    if (duplicate) {
-      throw new ConflictException({
-        message: "A duplicate lead already exists.",
-        leadToken: duplicate.leadToken,
+    
+    // Check for duplicates in memory and database
+    if (await this.hasDuplicateInMemory(input, email, companyName, website)) {
+      const existing = Array.from(this.leads.values()).find((lead) => {
+        if (email && lead.email.toLowerCase() === email) return true;
+        return !email && !lead.email &&
+          this.normalizeCompany(lead.companyName) === this.normalizeCompany(companyName) &&
+          this.normalizeDomain(lead.website) === this.normalizeDomain(website);
       });
+      if (existing) {
+        throw new ConflictException({
+          message: "A duplicate lead already exists.",
+          leadToken: existing.leadToken,
+        });
+      }
     }
 
     const timestamp = new Date().toISOString();
@@ -167,7 +277,7 @@ export class LeadsService {
       companySize: this.optionalText(input.companySize, "companySize", 80),
       targetSizeSegment: this.optionalSizeSegment(input.targetSizeSegment),
       location: this.optionalText(input.location, "location", 160),
-      source: this.optionalText(input.source, "source", 120),
+      source: this.optionalText(input.source, "source", 120) || "manual",
       sourceUrl: this.optionalText(input.sourceUrl, "sourceUrl", 2048),
       linkedinUrl: this.optionalText(input.linkedinUrl, "linkedinUrl", 2048),
       description: this.optionalText(input.description, "description", 4000),
@@ -186,7 +296,101 @@ export class LeadsService {
 
     this.leads.set(id, lead);
     this.record(lead, "LEAD_CREATED", "SUCCESS", { status: lead.status });
+
+    // Persist to database
+    this.persistToDatabase(lead).catch(console.error);
+
     return lead;
+  }
+
+  private async hasDuplicateInMemory(
+    input: CreateLeadInput,
+    email: string,
+    companyName: string,
+    website: string,
+  ): Promise<boolean> {
+    // Check in memory first
+    const inMemoryDuplicate = Array.from(this.leads.values()).find((lead) => {
+      if (email && lead.email.toLowerCase() === email) return true;
+      return !email && !lead.email &&
+        this.normalizeCompany(lead.companyName) === this.normalizeCompany(companyName) &&
+        this.normalizeDomain(lead.website) === this.normalizeDomain(website);
+    });
+    
+    if (inMemoryDuplicate) {
+      return true;
+    }
+
+    // Check in database
+    try {
+      if (email) {
+        const result = await this.database.query(
+          'SELECT 1 FROM leads WHERE email = $1 LIMIT 1',
+          [email.toLowerCase()],
+        );
+        if (result.rowCount && result.rowCount > 0) return true;
+      }
+      
+      if (website) {
+        const domain = this.normalizeDomain(website);
+        const result = await this.database.query(
+          'SELECT 1 FROM leads WHERE normalize_domain(website) = $1 LIMIT 1',
+          [domain],
+        );
+        if (result.rowCount && result.rowCount > 0) return true;
+      }
+      
+      return false;
+    } catch (error) {
+      // If database check fails, rely on in-memory check
+      return false;
+    }
+  }
+
+  private async persistToDatabase(lead: Lead): Promise<void> {
+    try {
+      await this.database.query(
+        `INSERT INTO leads (
+          id, lead_token, company_name, contact_name, job_title, email, phone,
+          website, industry, company_size, target_size_segment, location, source,
+          source_url, linkedin_url, description, technologies, lead_score, score_reasons,
+          qualification, status, last_contacted_at, last_response_at, next_action_at,
+          email_sequence_id, ai_processed, ai_analyzed, metadata, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, false, false, '{}', $28, $29)
+        ON CONFLICT (id) DO NOTHING`,
+        [
+          lead.id,
+          lead.leadToken,
+          lead.companyName,
+          lead.contactName || null,
+          lead.jobTitle || null,
+          lead.email || null,
+          lead.phone || null,
+          lead.website || null,
+          lead.industry || null,
+          lead.companySize || null,
+          lead.targetSizeSegment || null,
+          lead.location || null,
+          lead.source,
+          lead.sourceUrl || null,
+          lead.linkedinUrl || null,
+          lead.description || null,
+          JSON.stringify(lead.technologies || []),
+          lead.leadScore || 0,
+          JSON.stringify(lead.scoreReasons || []),
+          lead.qualification || 'UNSCORED',
+          lead.status,
+          lead.lastContactedAt,
+          lead.lastResponseAt,
+          lead.nextActionAt,
+          lead.emailSequenceId,
+          new Date(lead.createdAt),
+          new Date(lead.updatedAt),
+        ],
+      );
+    } catch (error) {
+      console.error('Failed to persist lead to database:', error);
+    }
   }
 
   update(id: string, changes: Partial<CreateLeadInput> & { status?: string }): Lead {
@@ -257,7 +461,55 @@ export class LeadsService {
       this.record(lead, suppressionAction, "SUCCESS", { status: lead.status });
     }
     this.record(lead, "LEAD_UPDATED", "SUCCESS", { fields: Object.keys(changes).join(",") });
+
+    // Persist to database
+    this.updateInDatabase(lead).catch(console.error);
+
     return lead;
+  }
+
+  private async updateInDatabase(lead: Lead): Promise<void> {
+    try {
+      await this.database.query(
+        `UPDATE leads SET
+          company_name = $1, contact_name = $2, job_title = $3, email = $4, phone = $5,
+          website = $6, industry = $7, company_size = $8, target_size_segment = $9,
+          location = $10, source = $11, source_url = $12, linkedin_url = $13,
+          description = $14, technologies = $15, lead_score = $16,
+          score_reasons = $17, qualification = $18, status = $19,
+          last_contacted_at = $20, last_response_at = $21, next_action_at = $22,
+          email_sequence_id = $23, updated_at = NOW()
+        WHERE id = $24`,
+        [
+          lead.companyName,
+          lead.contactName || null,
+          lead.jobTitle || null,
+          lead.email || null,
+          lead.phone || null,
+          lead.website || null,
+          lead.industry || null,
+          lead.companySize || null,
+          lead.targetSizeSegment || null,
+          lead.location || null,
+          lead.source,
+          lead.sourceUrl || null,
+          lead.linkedinUrl || null,
+          lead.description || null,
+          JSON.stringify(lead.technologies || []),
+          lead.leadScore || 0,
+          JSON.stringify(lead.scoreReasons || []),
+          lead.qualification || 'UNSCORED',
+          lead.status,
+          lead.lastContactedAt,
+          lead.lastResponseAt,
+          lead.nextActionAt,
+          lead.emailSequenceId,
+          lead.id,
+        ],
+      );
+    } catch (error) {
+      console.error('Failed to update lead in database:', error);
+    }
   }
 
   suppress(id: string, reason: string): Lead {
@@ -275,6 +527,10 @@ export class LeadsService {
     this.record(lead, "LEAD_SUPPRESSED", "SUCCESS", {
       reason: auditReason,
     });
+
+    // Persist to database
+    this.updateInDatabase(lead).catch(console.error);
+
     return lead;
   }
 
@@ -296,6 +552,10 @@ export class LeadsService {
     lead.updatedAt = new Date().toISOString();
     this.leads.set(lead.id, lead);
     this.record(lead, "LEAD_SCORED", "SUCCESS", { score, qualification: lead.qualification });
+
+    // Persist to database
+    this.updateInDatabase(lead).catch(console.error);
+
     return lead;
   }
 
@@ -311,6 +571,10 @@ export class LeadsService {
     this.record(lead, "OUTBOUND_EMAIL_SENT", "SUCCESS", {
       status: lead.status,
     });
+
+    // Persist to database
+    this.updateInDatabase(lead).catch(console.error);
+
     return structuredClone(lead);
   }
 
@@ -342,6 +606,10 @@ export class LeadsService {
       wasSuppressed ? "IGNORED_SUPPRESSED" : "SUCCESS",
       {},
     );
+
+    // Persist to database
+    this.updateInDatabase(lead).catch(console.error);
+
     return { leadToken: lead.leadToken, status: lead.status, applied: !wasSuppressed };
   }
 
@@ -389,15 +657,31 @@ export class LeadsService {
     result: string,
     metadata: AuditEvent["metadata"],
   ): void {
-    this.auditEvents.push({
+    const event: AuditEvent = {
       id: randomUUID(),
       timestamp: new Date().toISOString(),
       leadToken: lead.leadToken,
       action,
       result,
       metadata,
-    });
+    };
+    this.auditEvents.push(event);
     if (this.auditEvents.length > 5000) this.auditEvents.shift();
+
+    // Persist to database
+    this.persistAuditToDatabase(event).catch(console.error);
+  }
+
+  private async persistAuditToDatabase(event: AuditEvent): Promise<void> {
+    try {
+      await this.database.query(
+        `INSERT INTO lead_audit (lead_token, action, result, metadata)
+         VALUES ($1, $2, $3, $4)`,
+        [event.leadToken, event.action, event.result, JSON.stringify(event.metadata)],
+      );
+    } catch (error) {
+      console.error('Failed to persist audit event to database:', error);
+    }
   }
 
   private requiredText(value: unknown, field: string, maxLength: number): string {
