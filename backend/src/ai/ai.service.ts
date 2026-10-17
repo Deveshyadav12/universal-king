@@ -5,7 +5,9 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 
-const AI_URL = process.env.HEXAWAVE_AI_URL ?? 'http://127.0.0.1:8000';
+const AI_URL = (
+  process.env.HEXAWAVE_AI_URL || 'http://127.0.0.1:8000'
+).trim().replace(/\/+$/, '');
 
 export interface ProjectGenerationRequest {
   projectName: string;
