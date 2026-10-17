@@ -65,7 +65,7 @@ export class EmailService {
     const config = this.getSmtpConfiguration();
     if (!config) {
       throw new ServiceUnavailableException(
-        "Outbound email is not configured. Set the BREVO_SMTP_USER, BREVO_SMTP_KEY, and BREVO_FROM_EMAIL backend variables.",
+        "Outbound email is not configured. Check EMAIL_SMTP_USER, EMAIL_SMTP_PASS, EMAIL_FROM and the corresponding BREVO_* variables.",
       );
     }
 
