@@ -162,8 +162,6 @@ export class EmailService {
       eventType as "reply" | "unsubscribe" | "bounce",
     );
   }
-
-```ts
   private getSmtpConfiguration(): SmtpConfiguration | null {
     const host =
       process.env.BREVO_SMTP_HOST?.trim() ||
