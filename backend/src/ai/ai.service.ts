@@ -187,30 +187,72 @@ export class AiService {
     return this.fetchJson('/health');
   }
 
-  async scoreLead(lead: object): Promise<AiLeadScore> {
+ async scoreLead(lead: Record<string, unknown>): Promise<AiLeadScore> {
+  try {
     const result = await this.fetchJson<unknown>('/lead/score', {
       method: 'POST',
       body: JSON.stringify({ lead }),
     });
+
     if (
-      typeof result !== 'object' ||
-      result === null ||
-      !('score' in result) ||
-      !('reasons' in result) ||
-      !('qualification' in result) ||
-      typeof result.score !== 'number' ||
-      !Number.isInteger(result.score) ||
-      result.score < 0 ||
-      result.score > 100 ||
-      !Array.isArray(result.reasons) ||
-      result.reasons.some((reason) => typeof reason !== 'string') ||
-      typeof result.qualification !== 'string' ||
-      !['HIGH_PRIORITY', 'GOOD', 'MEDIUM', 'LOW'].includes(result.qualification)
+      typeof result === 'object' &&
+      result !== null &&
+      'score' in result &&
+      typeof result.score === 'number' &&
+      Number.isInteger(result.score) &&
+      result.score >= 0 &&
+      result.score <= 100 &&
+      'reasons' in result &&
+      Array.isArray(result.reasons) &&
+      result.reasons.every((reason) => typeof reason === 'string') &&
+      'qualification' in result &&
+      typeof result.qualification === 'string' &&
+      ['HIGH_PRIORITY', 'GOOD', 'MEDIUM', 'LOW'].includes(
+        result.qualification,
+      )
     ) {
-      throw new InternalServerErrorException(
-        'AI returned an invalid lead score.',
-      );
+      return {
+        score: result.score,
+        reasons: result.reasons,
+        qualification: result.qualification as AiLeadScore['qualification'],
+      };
     }
+
+    throw new Error('Invalid AI lead score response');
+  } catch (error: unknown) {
+    // Use a predictable fallback only for AI-service failures.
+    const detail = error instanceof Error ? error.message : 'Unknown error';
+    console.error(`AI lead scoring unavailable: ${detail}`);
+
+    const text = [
+      lead['companyName'],
+      lead['company_name'],
+      lead['industry'],
+      lead['website'],
+      lead['description'],
+    ]
+      .filter((value): value is string => typeof value === 'string')
+      .join(' ')
+      .toLowerCase();
+
+    const hasWebsite = Boolean(lead['website']);
+    const hasEmail = Boolean(lead['email']);
+    const score = Math.min(
+      100,
+      20 + (hasWebsite ? 20 : 0) + (hasEmail ? 20 : 0) +
+        (text.length > 20 ? 10 : 0),
+    );
+
+    return {
+      score,
+      reasons: ['Fallback score: AI service unavailable', `Basic profile score: ${score}`],
+      qualification:
+        score >= 70 ? 'HIGH_PRIORITY' :
+        score >= 50 ? 'GOOD' :
+        score >= 35 ? 'MEDIUM' : 'LOW',
+    };
+  }
+}
     return {
       score: result.score,
       reasons: result.reasons,
