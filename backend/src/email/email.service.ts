@@ -85,6 +85,9 @@ export class EmailService {
       secure: config.port === 465,
       auth: { user: config.user, pass: config.password },
     });
+    this.logger.log(
+  `Attempting CRM email for lead ${lead.id} via ${config.host}:${config.port}`,
+);
     let messageId: string;
     try {
       const result = await transporter.sendMail({
