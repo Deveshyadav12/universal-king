@@ -163,14 +163,35 @@ export class EmailService {
     );
   }
 
+```ts
   private getSmtpConfiguration(): SmtpConfiguration | null {
-    const host = process.env.BREVO_SMTP_HOST?.trim() || "smtp-relay.brevo.com";
-    const portValue = process.env.BREVO_SMTP_PORT?.trim() || "587";
+    const host =
+      process.env.BREVO_SMTP_HOST?.trim() ||
+      process.env.EMAIL_SMTP_HOST?.trim() ||
+      "smtp-relay.brevo.com";
+
+    const portValue =
+      process.env.BREVO_SMTP_PORT?.trim() ||
+      process.env.EMAIL_SMTP_PORT?.trim() ||
+      "587";
+
     const port = Number(portValue);
-    const user = process.env.BREVO_SMTP_USER?.trim();
-    const password = process.env.BREVO_SMTP_KEY?.trim();
-    const fromEmail = process.env.BREVO_FROM_EMAIL?.trim();
-    const fromName = process.env.BREVO_FROM_NAME?.trim() || "HexaWave";
+
+    const user =
+      process.env.BREVO_SMTP_USER?.trim() ||
+      process.env.EMAIL_SMTP_USER?.trim();
+
+    const password =
+      process.env.BREVO_SMTP_KEY?.trim() ||
+      process.env.BREVO_SMTP_PASS?.trim() ||
+      process.env.EMAIL_SMTP_PASS?.trim();
+
+    const fromEmail =
+      process.env.BREVO_FROM_EMAIL?.trim() ||
+      process.env.EMAIL_FROM?.trim();
+
+    const fromName =
+      process.env.BREVO_FROM_NAME?.trim() || "Universal King";
 
     if (
       !user ||
@@ -179,11 +200,11 @@ export class EmailService {
       !EMAIL_PATTERN.test(fromEmail) ||
       !Number.isInteger(port) ||
       port < 1 ||
-      port > 65_535
+      port > 65535
     ) {
       return null;
     }
 
     return { host, port, user, password, fromEmail, fromName };
   }
-}
+```}
