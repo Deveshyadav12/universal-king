@@ -207,4 +207,4 @@ export class EmailService {
 
     return { host, port, user, password, fromEmail, fromName };
   }
-```}
+}
