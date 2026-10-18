@@ -1,48 +1,102 @@
 
 import {
-  BadGatewayException,
+  HttpException,
   Injectable,
   ServiceUnavailableException,
 } from '@nestjs/common';
 
+const AI_URL = (
+  process.env.HEXAWAVE_AI_URL || 'http://127.0.0.1:8000'
+)
+  .trim()
+  .replace(/\/+$/, '');
+
 export interface ProjectGenerationRequest {
-  [key: string]: unknown;
+  projectName: string;
+  projectType: string;
+  stack: string;
+  prompt: string;
+  projectId?: string;
+  generationMode?: 'fast' | 'full';
+}
+
+export interface AiProjectMetadata {
+  id: string;
+  name?: string;
+  type?: string;
+  stack?: string;
+  description?: string;
+  status?: string;
+  ownerId?: string;
+  process?: {
+    pid: number;
+    port: number;
+    status: string;
+    startedAt: string;
+  } | null;
+  createdAt?: string;
+  files?: string[];
 }
 
 export interface AiProjectResponse {
-  [key: string]: unknown;
   success?: boolean;
   projectId?: string;
   id?: string;
   status?: string;
   message?: string;
+  process?: AiProjectMetadata['process'];
+  analysis?: unknown;
+  files?: Array<{ name: string; language: string; content: string }>;
+  build?: {
+    passed?: boolean;
+    attempts?: number;
+    errors?: string[];
+    stage?: string;
+    stdout?: string;
+    stderr?: string;
+  };
+  [key: string]: unknown;
 }
 
-interface ZipDownloadResponse {
+export interface AiHealthResponse {
+  success: boolean;
+  service: string;
+  status: 'online';
+  version: string;
+  workspaces: number;
+}
+
+export interface AiLeadScore {
+  score: number;
+  reasons: string[];
+  qualification: 'HIGH_PRIORITY' | 'GOOD' | 'MEDIUM' | 'LOW';
+}
+
+export interface ZipDownloadResponse {
   buffer: Buffer;
   contentDisposition: string | null;
 }
 
-interface ProjectFilesResponse {
+export interface ProjectFilesResponse {
   success: boolean;
   projectId: string;
   files: string[];
 }
 
-interface ProjectFileResponse {
+export interface ProjectFileResponse {
   success: boolean;
   path: string;
   content: string;
 }
 
-interface MaintenanceResponse {
+export interface MaintenanceResponse {
   success: boolean;
   summary: string;
   changedFiles: string[];
   excludedFileCount: number;
 }
 
-interface TestResult {
+export interface TestResult {
   passed: boolean;
   errors: string[];
   skipped?: boolean;
@@ -50,7 +104,7 @@ interface TestResult {
   stderr?: string;
 }
 
-interface BuildResult {
+export interface BuildResult {
   passed: boolean;
   attempts: number;
   stage?: string;
@@ -59,7 +113,7 @@ interface BuildResult {
   stderr?: string;
 }
 
-interface AutonomousTaskResponse extends MaintenanceResponse {
+export interface AutonomousTaskResponse extends MaintenanceResponse {
   test: TestResult;
   runtimeTests: TestResult;
   build: BuildResult;
@@ -67,66 +121,59 @@ interface AutonomousTaskResponse extends MaintenanceResponse {
 
 @Injectable()
 export class AiService {
-  private readonly baseUrl = (
-    process.env.AI_SERVICE_URL || 'http://localhost:8000'
-  ).replace(/\/+$/, '');
-
-  private readonly requestTimeoutMs = 120_000;
-
   private async fetchAi(
     path: string,
     options: RequestInit = {},
   ): Promise<Response> {
-    const url = `${this.baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
+    const serviceToken = process.env.HEXAWAVE_AI_SERVICE_TOKEN;
+    const isProduction = ['HEXAWAVE_ENV', 'NODE_ENV', 'APP_ENV'].some(
+      (name) => process.env[name]?.trim().toLowerCase() === 'production',
+    );
 
-    const headers = new Headers(options.headers);
-    const internalToken = process.env.INTERNAL_SERVICE_TOKEN;
-
-    if (internalToken) {
-      headers.set('x-internal-service-token', internalToken);
+    if (!serviceToken && isProduction) {
+      throw new ServiceUnavailableException(
+        'HexaWave AI service authentication is not configured.',
+      );
     }
 
-    if (options.body !== undefined && !headers.has('content-type')) {
+    const headers = new Headers(options.headers);
+
+    if (!headers.has('content-type')) {
       headers.set('content-type', 'application/json');
     }
 
-    if (!headers.has('accept')) {
-      headers.set('accept', '*/*');
-    }
+    headers.set('accept', headers.get('accept') || 'application/json');
 
-    const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(),
-      this.requestTimeoutMs,
-    );
+    if (serviceToken) {
+      headers.set('X-Hexawave-Service-Token', serviceToken);
+    }
 
     let response: Response;
 
     try {
-      response = await fetch(url, {
+      response = await fetch(`${AI_URL}${path}`, {
         ...options,
         headers,
-        signal: controller.signal,
+        signal: options.signal,
       });
     } catch (error: unknown) {
-      const message =
+      const detail =
         error instanceof Error ? error.message : 'Unknown network error';
 
       throw new ServiceUnavailableException(
-        `AI service is unavailable: ${message}`,
+        `HexaWave AI service is unavailable: ${detail}`,
       );
-    } finally {
-      clearTimeout(timeout);
     }
 
     if (!response.ok) {
-      const errorBody = await response.text().catch(() => '');
-      const details = errorBody.slice(0, 2000);
+      const detail = (await response.text().catch(() => '')).slice(0, 2000);
+      const status = response.status >= 500 ? 502 : response.status;
 
-      throw new BadGatewayException(
-        `AI service returned HTTP ${response.status}${
-          details ? `: ${details}` : ''
+      throw new HttpException(
+        `AI service ${path} returned ${response.status}${
+          detail ? `: ${detail}` : ''
         }`,
+        status,
       );
     }
 
@@ -141,19 +188,74 @@ export class AiService {
     const body = await response.text();
 
     if (!body.trim()) {
-      return undefined as T;
+      throw new HttpException(
+        `AI service returned an empty response for ${path}`,
+        502,
+      );
     }
 
     try {
       return JSON.parse(body) as T;
     } catch {
-      throw new BadGatewayException(
+      throw new HttpException(
         `AI service returned invalid JSON for ${path}`,
+        502,
       );
     }
   }
 
-  async generateProjectZip(
+  async getHealth(): Promise<AiHealthResponse> {
+    return this.fetchJson<AiHealthResponse>('/health');
+  }
+
+  async getProjects(): Promise<{
+    success: boolean;
+    projects: AiProjectMetadata[];
+  }> {
+    return this.fetchJson('/projects');
+  }
+
+  async getProject(
+    id: string,
+  ): Promise<{ success: boolean; project: AiProjectMetadata }> {
+    return this.fetchJson(`/projects/${encodeURIComponent(id)}`);
+  }
+
+  async createWorkspace(
+    id: string,
+    data: {
+      name: string;
+      type: string;
+      stack: string;
+      description: string;
+    },
+  ): Promise<{ success: boolean; project: AiProjectMetadata }> {
+    return this.fetchJson('/projects', {
+      method: 'POST',
+      body: JSON.stringify({
+        projectId: id,
+        name: data.name,
+        type: data.type,
+        stack: data.stack,
+        description: data.description,
+      }),
+    });
+  }
+
+  async generate(
+    data: ProjectGenerationRequest,
+  ): Promise<AiProjectResponse> {
+    const endpoint = data.projectId
+      ? `/projects/${encodeURIComponent(data.projectId)}/generate`
+      : '/generate';
+
+    return this.fetchJson<AiProjectResponse>(endpoint, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async generateZip(
     data: ProjectGenerationRequest,
   ): Promise<ZipDownloadResponse> {
     const response = await this.fetchAi('/generate/zip', {
@@ -177,13 +279,13 @@ export class AiService {
   }
 
   async getProjectStatus(id: string): Promise<AiProjectResponse> {
-    return this.fetchJson<AiProjectResponse>(
+    return this.fetchJson(
       `/projects/${encodeURIComponent(id)}/status`,
     );
   }
 
   async getProjectFiles(id: string): Promise<ProjectFilesResponse> {
-    return this.fetchJson<ProjectFilesResponse>(
+    return this.fetchJson(
       `/projects/${encodeURIComponent(id)}/files`,
     );
   }
@@ -192,10 +294,8 @@ export class AiService {
     id: string,
     filePath: string,
   ): Promise<ProjectFileResponse> {
-    const encodedPath = encodeURIComponent(filePath);
-
-    return this.fetchJson<ProjectFileResponse>(
-      `/projects/${encodeURIComponent(id)}/files/${encodedPath}`,
+    return this.fetchJson(
+      `/projects/${encodeURIComponent(id)}/files/${encodeURIComponent(filePath)}`,
     );
   }
 
@@ -204,10 +304,8 @@ export class AiService {
     filePath: string,
     content: string,
   ): Promise<ProjectFileResponse> {
-    const encodedPath = encodeURIComponent(filePath);
-
-    return this.fetchJson<ProjectFileResponse>(
-      `/projects/${encodeURIComponent(id)}/files/${encodedPath}`,
+    return this.fetchJson(
+      `/projects/${encodeURIComponent(id)}/files/${encodeURIComponent(filePath)}`,
       {
         method: 'PUT',
         body: JSON.stringify({ content }),
@@ -220,7 +318,7 @@ export class AiService {
     filePath: string,
     instruction: string,
   ): Promise<ProjectFileResponse> {
-    return this.fetchJson<ProjectFileResponse>(
+    return this.fetchJson(
       `/projects/${encodeURIComponent(id)}/ai-edit`,
       {
         method: 'POST',
@@ -233,7 +331,7 @@ export class AiService {
     id: string,
     instruction: string,
   ): Promise<MaintenanceResponse> {
-    return this.fetchJson<MaintenanceResponse>(
+    return this.fetchJson(
       `/projects/${encodeURIComponent(id)}/ai-maintain`,
       {
         method: 'POST',
@@ -246,7 +344,7 @@ export class AiService {
     id: string,
     instruction: string,
   ): Promise<AutonomousTaskResponse> {
-    return this.fetchJson<AutonomousTaskResponse>(
+    return this.fetchJson(
       `/projects/${encodeURIComponent(id)}/ai-autonomous`,
       {
         method: 'POST',
@@ -256,11 +354,9 @@ export class AiService {
   }
 
   async buildProject(id: string): Promise<AiProjectResponse> {
-    return this.fetchJson<AiProjectResponse>(
+    return this.fetchJson(
       `/projects/${encodeURIComponent(id)}/build`,
-      {
-        method: 'POST',
-      },
+      { method: 'POST' },
     );
   }
 
@@ -276,20 +372,137 @@ export class AiService {
   }
 
   async runProject(id: string): Promise<AiProjectResponse> {
-    return this.fetchJson<AiProjectResponse>(
+    return this.fetchJson(
       `/projects/${encodeURIComponent(id)}/run`,
-      {
-        method: 'POST',
-      },
+      { method: 'POST' },
     );
   }
 
   async stopProject(id: string): Promise<AiProjectResponse> {
-    return this.fetchJson<AiProjectResponse>(
+    return this.fetchJson(
       `/projects/${encodeURIComponent(id)}/stop`,
-      {
-        method: 'POST',
-      },
+      { method: 'POST' },
     );
+  }
+
+  async importMaintenanceProject(
+    projectId: string,
+    projectName: string,
+    archiveBase64: string,
+  ): Promise<{
+    success: boolean;
+    project: AiProjectMetadata;
+    files: string[];
+    message: string;
+  }> {
+    return this.fetchJson('/projects/maintenance/import', {
+      method: 'POST',
+      body: JSON.stringify({ projectId, projectName, archiveBase64 }),
+    });
+  }
+
+  async importGithubMaintenanceProject(
+    projectId: string,
+    repositoryUrl: string,
+  ): Promise<{
+    success: boolean;
+    project: AiProjectMetadata;
+    files: string[];
+    message: string;
+  }> {
+    return this.fetchJson('/projects/maintenance/import-github', {
+      method: 'POST',
+      body: JSON.stringify({ projectId, repositoryUrl }),
+    });
+  }
+
+  async scoreLead(lead: object): Promise<AiLeadScore> {
+    try {
+      const result = await this.fetchJson<unknown>('/lead/score', {
+        method: 'POST',
+        body: JSON.stringify({ lead }),
+      });
+
+      if (
+        typeof result === 'object' &&
+        result !== null &&
+        'score' in result &&
+        typeof result.score === 'number' &&
+        Number.isInteger(result.score) &&
+        result.score >= 0 &&
+        result.score <= 100 &&
+        'reasons' in result &&
+        Array.isArray(result.reasons) &&
+        result.reasons.every((reason) => typeof reason === 'string') &&
+        'qualification' in result &&
+        typeof result.qualification === 'string' &&
+        ['HIGH_PRIORITY', 'GOOD', 'MEDIUM', 'LOW'].includes(
+          result.qualification,
+        )
+      ) {
+        return {
+          score: result.score,
+          reasons: result.reasons as string[],
+          qualification:
+            result.qualification as AiLeadScore['qualification'],
+        };
+      }
+
+      throw new Error('Invalid AI lead score response');
+    } catch (error: unknown) {
+      const detail =
+        error instanceof Error ? error.message : 'Unknown error';
+
+      // Fallback keeps lead qualification available while AI is offline.
+      console.error(
+        `AI lead scoring unavailable; using fallback: ${detail}`,
+      );
+
+      const data = lead as Record<string, unknown>;
+      const profileText = [
+        data['companyName'],
+        data['company_name'],
+        data['industry'],
+        data['website'],
+        data['description'],
+      ]
+        .filter((value): value is string => typeof value === 'string')
+        .join(' ')
+        .toLowerCase();
+
+      const hasWebsite =
+        typeof data['website'] === 'string' &&
+        data['website'].trim().length > 0;
+
+      const hasEmail =
+        typeof data['email'] === 'string' &&
+        data['email'].trim().length > 0;
+
+      const hasUsefulProfile = profileText.trim().length > 20;
+
+      const score = Math.min(
+        100,
+        20 +
+          (hasWebsite ? 20 : 0) +
+          (hasEmail ? 20 : 0) +
+          (hasUsefulProfile ? 10 : 0),
+      );
+
+      return {
+        score,
+        reasons: [
+          'Fallback score: AI service unavailable',
+          `Basic profile score: ${score}`,
+        ],
+        qualification:
+          score >= 70
+            ? 'HIGH_PRIORITY'
+            : score >= 50
+              ? 'GOOD'
+              : score >= 35
+                ? 'MEDIUM'
+                : 'LOW',
+      };
+    }
   }
 }
